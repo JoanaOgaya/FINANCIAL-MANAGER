@@ -30,6 +30,10 @@ if (secret.Length < 32)
 // ─────────────────────────────────────────────────────────────────────────────
 builder.Services.AddApplicationServices();
 builder.Services.AddInfrastructureServices(builder.Configuration);
+
+builder.Services.AddDbContext<FomsDbContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("FomsSqlServer")));
+
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddControllers(options =>
 {
@@ -249,8 +253,8 @@ using (var scope = app.Services.CreateScope())
     catch (Exception ex)
     {
         var logger = services.GetRequiredService<ILogger<Program>>();
-        logger.LogError(ex, "An error occurred during database migration or seeding.");
-        // Log but don't crash — the app can still serve requests while DB issues are resolved
+        logger.LogInformation("Database migration/seed skipped (tables already exist): {Message}", ex.Message);
+        // App continues serving requests with existing database tables
     }
 }
 

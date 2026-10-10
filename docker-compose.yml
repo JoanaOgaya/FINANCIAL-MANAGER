@@ -1,23 +1,4 @@
 services:
-  mssql:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    container_name: foms-mssql
-    environment:
-      - SA_PASSWORD=${MSSQL_SA_PASSWORD}
-      - ACCEPT_EULA=Y
-    ports:
-      - "${MSSQL_PORT:-1433}:1433"
-    volumes:
-      - mssql-data:/var/opt/mssql
-    healthcheck:
-      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$SA_PASSWORD\" -Q \"SELECT 1\" -C || /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P \"$$SA_PASSWORD\" -Q \"SELECT 1\""]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-      start_period: 30s
-    networks:
-      - foms-network
-
   postgres:
     image: postgres:15-alpine
     container_name: foms-postgres
@@ -71,7 +52,6 @@ services:
       - foms-network
 
 volumes:
-  mssql-data:
   postgres-data:
   mongodb-data:
 
