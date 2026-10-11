@@ -12,43 +12,7 @@ namespace FOMS.Api.Controllers;
 [AllowAnonymous]
 public class SettlementsController : ApiControllerBase
 {
-    private static readonly List<object> _settlements = new()
-    {
-        new
-        {
-            id = "STL-001",
-            type = "Leftover return",
-            courierName = "Speedex Courier 1",
-            tripRef = "TRIP-2026-081",
-            submittedAt = "2026-10-10",
-            amount = 1250.00,
-            discrepancy = 0.00,
-            status = "Validated",
-            cashAdvance = 5000.00,
-            totalExpenses = 3750.00,
-            envelopeNo = "ENV-1001",
-            cashCounted = 1250.00,
-            recordedBy = "Accountant",
-            recordedAt = "2026-10-10"
-        },
-        new
-        {
-            id = "STL-002",
-            type = "Reimbursement",
-            courierName = "Speedex Courier 2",
-            tripRef = "TRIP-2026-082",
-            submittedAt = "2026-10-11",
-            amount = 450.00,
-            discrepancy = 0.00,
-            status = "For validation",
-            cashAdvance = 3000.00,
-            totalExpenses = 3450.00,
-            envelopeNo = "ENV-1002",
-            cashCounted = 0.00,
-            recordedBy = "Accountant",
-            recordedAt = "2026-10-11"
-        }
-    };
+    private static readonly List<object> _settlements = new();
 
     [HttpGet]
     public IActionResult GetSettlements([FromQuery] int page = 1, [FromQuery] int pageSize = 50)
