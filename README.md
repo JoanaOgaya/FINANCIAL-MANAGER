@@ -277,3 +277,9 @@ npm run dev
   - Ensure `TrustServerCertificate=True;` is included in the connection string.
 - **Error:** `Invalid object name 'AuditLogs'`
   - Ensure the active database context is `FOMS_DB` and the table schema `dbo.AuditLogs` is created.
+
+## Backend Implementation Plan
+
+The full backend and database implementation plan is documented in **backend_implementation_plan.md** in this repository.
+
+---
