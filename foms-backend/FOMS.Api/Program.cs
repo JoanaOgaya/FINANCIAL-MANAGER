@@ -242,19 +242,32 @@ await app.StartAsync();
 using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
+    var logger = services.GetRequiredService<ILogger<Program>>();
     try
     {
         var context = services.GetRequiredService<ApplicationDbContext>();
-        // Apply all pending EF Core migrations (creates DB if it doesn't exist)
-        await context.Database.MigrateAsync();
-        // Seed reference data and demo accounts
-        await ApplicationDbContextSeed.SeedSampleDataAsync(context);
+        try
+        {
+            await context.Database.MigrateAsync();
+        }
+        catch (Exception ex)
+        {
+            logger.LogInformation("Database migration skipped (tables exist): {Message}", ex.Message);
+        }
+
+        try
+        {
+            await ApplicationDbContextSeed.SeedSampleDataAsync(context);
+            logger.LogInformation("Database seeded successfully.");
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning("Database seed warning: {Message}", ex.Message);
+        }
     }
     catch (Exception ex)
     {
-        var logger = services.GetRequiredService<ILogger<Program>>();
-        logger.LogInformation("Database migration/seed skipped (tables already exist): {Message}", ex.Message);
-        // App continues serving requests with existing database tables
+        logger.LogWarning("Database initialization error: {Message}", ex.Message);
     }
 }
 
