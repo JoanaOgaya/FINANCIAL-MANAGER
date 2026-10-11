@@ -1,159 +1,163 @@
-# Integrated System: FOMS & AI-Powered Financial Intelligence Layer
+# Finance Operations Management System (FOMS) & Financial Intelligence Platform
 
-This repository contains the integrated codebase for the **Finance Operations Management System (FOMS)** and the **AI-Powered Financial Intelligence Layer**.
+An enterprise financial management platform that integrates the core Finance Operations Management System (FOMS) with an AI-driven Financial Intelligence Layer for automated billing, digital payment processing, delinquency risk assessment, and document validation.
 
 ---
 
-## 📂 Repository Structure
+## Repository Structure
 
 ```text
 FOMS-System-Repository/
-│
-├── foms-frontend/              ← React + TypeScript Staff Portal (Port 5173)
-├── foms-backend/               ← C# .NET 10 Web API, EF Core & Local MSSQL (Port 5007)
-│   └── FOMS.Api/               ← Primary API entry point & Controllers
-├── speedpay-portal/            ← React + TypeScript SpeedPay Client Portal (Port 5174)
-├── ai-frontend/                ← React AI Decision Support Dashboard (Port 5175)
-├── ai-service/                 ← Python FastAPI AI Intelligence Engine & Gemini OCR (Port 8000)
-├── ai-gateway/                 ← ASP.NET Core 10 Integration Gateway (Port 5000)
-├── scripts/                    ← Utility & data seed scripts
-├── docker-compose.yml          ← Orchestrates PostgreSQL, MongoDB, and pgAdmin
-├── .env.example                ← Environment template
-├── .env                        ← Local secrets and credentials (gitignored)
-└── README.md
+|
++-- foms-frontend/              Staff Operations Web Application (React, TypeScript)
++-- foms-backend/               Core Financial Web API (.NET 10, EF Core, SQL Server)
+|   +-- FOMS.Api/               API Entry Point, Controllers, and Middleware
++-- speedpay-portal/            Client Self-Service Payment Portal (React, TypeScript)
++-- ai-frontend/                Financial Intelligence Dashboard (React, TypeScript)
++-- ai-service/                 AI Intelligence Engine & Document Processing (Python FastAPI)
++-- ai-gateway/                 Integration Gateway (.NET 10)
++-- scripts/                    Database Seeding and Diagnostic Utilities
++-- docker-compose.yml          Container orchestration for PostgreSQL, MongoDB, and pgAdmin
++-- .env.example                Environment configuration template
++-- .env                        Local configuration (gitignored)
++-- README.md                   System documentation
 ```
 
-> **Architecture Note:** All sub-projects operate as independent, decoupled services inside a monorepo structure.
+---
+
+## Service Endpoints and Port Allocation
+
+| Component | Layer / Framework | Host / Port | Default URL |
+|---|---|---|---|
+| FOMS Staff Portal | Frontend (Vite, React) | Localhost:5173 | http://localhost:5173 |
+| SpeedPay Client Portal | Frontend (Vite, React) | Localhost:5174 | http://localhost:5174 |
+| AI Intelligence Dashboard | Frontend (Vite, React) | Localhost:5175 | http://localhost:5175 |
+| FOMS Core Backend API | Backend (.NET 10 Web API) | Localhost:5007 | http://localhost:5007/api |
+| AI Integration Gateway | Gateway API (.NET 10) | Localhost:5000 | http://localhost:5000 |
+| AI Microservice Engine | Backend (Python FastAPI) | Localhost:8000 | http://localhost:8000 |
+| Swagger API Documentation | Interactive Documentation | Localhost:8000 | http://localhost:8000/docs |
+| pgAdmin 4 Administration | Database Console (Docker) | Localhost:5050 | http://localhost:5050 |
 
 ---
 
-## 📌 Quick Access URLs & Ports
+## Database Architecture
 
-| Service / Component | Layer / Framework | Local URL / Endpoint |
-|---|---|---|
-| 🖥️ **FOMS Staff Web Application** | Frontend (Vite + React) | [http://localhost:5173](http://localhost:5173) |
-| 💳 **SpeedPay Client Portal** | Frontend (Vite + React) | [http://localhost:5174](http://localhost:5174) |
-| 📊 **AI Intelligence Dashboard** | Frontend (Vite + React) | [http://localhost:5175](http://localhost:5175) |
-| ⚡ **FOMS Core .NET 10 Web API** | Backend API (.NET 10) | [http://localhost:5007/api](http://localhost:5007/api) |
-| 🛡️ **AI Integration Gateway** | Gateway API (.NET 10) | [http://localhost:5000](http://localhost:5000) |
-| 🤖 **FastAPI AI Intelligence Engine** | AI Microservice (Python) | [http://localhost:8000](http://localhost:8000) |
-| 📘 **FastAPI Swagger API Docs** | Interactive API Docs | [http://localhost:8000/docs](http://localhost:8000/docs) |
-| 🐘 **pgAdmin 4 Web Console** | Database GUI (Docker) | [http://localhost:5050](http://localhost:5050) |
+The architecture implements a polyglot persistence strategy designed for separation of concerns and operational compliance:
+
+| Database Engine | Deployment Mode | Database Name | Responsibility |
+|---|---|---|---|
+| Microsoft SQL Server | Local Service (`localhost\SQLEXPRESS`) | `FOMS_DB` | Primary source of truth for accounts, invoices, billing records, payments, and audit logs |
+| PostgreSQL 15 | Docker Container (`localhost:5432`) | `foms_ai_results` | Storage for AI processing results, document OCR extractions, and duplicate detection records |
+| MongoDB 6.0 | Docker Container (`localhost:27017`) | `foms_trends_db` | High-throughput time-series metrics, historical activity logs, and trend analytics |
 
 ---
 
-## 💾 Database Architecture
-
-| Database Engine | Hosting | Purpose & Database Name |
-|---|---|---|
-| **Microsoft SQL Server** | Local Service (`localhost\SQLEXPRESS`) | **FOMS_DB** — Official source of truth (Users, Invoices, Payments, Audit Logs) |
-| **PostgreSQL 15** | Docker (`localhost:5432`) | **foms_ai_results** — AI duplicate alerts, OCR extracts, risk classifications |
-| **MongoDB 6.0** | Docker (`localhost:27017`) | **foms_trends_db** — Time-series activity logs, historical trends, recommendations |
-
----
-
-## 🌟 Main Features & Modules
+## System Capabilities
 
 ### 1. Finance Operations Management System (FOMS)
-* **Accounts Receivable & Invoicing**: Automated billing computation, client rate cards, VAT calculations, and aging buckets.
-* **Waybill & Proof of Delivery (POD)**: Waybill verification, CTC tracking, and document lifecycle control.
-* **Digital Payments & SpeedPay**: Integrated PayMongo checkout (GCash, Maya, Cards) and payment proof validation.
-* **Official Receipts & Settlement**: Formal OR generation upon payment approval and settlement reconciliation.
-* **Audit Trail & RBAC**: Strict role-based access control with comprehensive audit logging for compliance.
+* **Accounts Receivable and Invoicing**: Automated billing schedules, customizable client rate cards, VAT computation, and aging analysis.
+* **Waybill and Delivery Verification**: Tracking and lifecycle management of Waybills and Proof of Delivery (POD) documentation.
+* **Digital Payment Processing**: Integrated checkout gateway via PayMongo supporting card payments, e-wallets (GCash, Maya), and bank transfers.
+* **Settlement and Receipt Issuance**: Generation of Official Receipts (OR) upon validated payment confirmation and reconciliation.
+* **Compliance and Auditability**: Role-based access control (RBAC) and tamper-evident audit logging for financial governance.
 
-### 2. AI-Powered Financial Intelligence Layer
-* **Document OCR & Strict Classifier**: Multi-modal Gemini API integration for financial document recognition (Official Receipts, Invoices, Bank Slips) with heuristic fallback.
-* **Duplicate Detection Engine**: Fuzzy matching and text comparison preventing double payments and fraudulent receipts.
-* **Delinquency Risk Scoring**: Predictive risk modeling assessing client payment behaviors and cash flow forecasts.
-* **No-Touch Recommendation Policy**: AI proposes collection priority actions without altering source-of-truth records.
+### 2. Financial Intelligence Layer
+* **Document Extraction and Classification**: Automated financial receipt and invoice OCR powered by Google Gemini API with fallback parsers.
+* **Duplicate Detection**: Levenshtein distance and fuzzy matching algorithms to identify potential fraudulent or redundant payment submissions.
+* **Credit Risk and Delinquency Analysis**: Algorithmic scoring that evaluates client settlement history and predicts payment defaults.
+* **Advisory Recommendations**: Data-driven collection recommendations provided to staff without modifying transactional source-of-truth records.
 
 ---
 
-## 🛠️ Technology Stack
+## Technology Stack
 
 | Domain | Technologies |
 |---|---|
-| **FOMS Backend** | C# .NET 10, Entity Framework Core, SQL Server Express |
-| **FOMS Frontend** | React, TypeScript, Vite, Vanilla CSS |
-| **SpeedPay Portal** | React, TypeScript, Vite, PayMongo Gateway API |
-| **AI Microservice** | Python 3.12+, FastAPI, Google Gemini API, Pandas, RapidFuzz |
-| **AI Gateway** | ASP.NET Core 10, HttpClientFactory |
-| **AI Frontend** | React 19, TypeScript, Vite |
-| **Databases** | Microsoft SQL Server, PostgreSQL 15, MongoDB 6.0 |
-| **Containerization** | Docker Compose |
+| Core Backend | C# .NET 10, ASP.NET Core Web API, Entity Framework Core 9 |
+| AI Microservice | Python 3.12+, FastAPI, Google Gemini API, Pandas, RapidFuzz |
+| Integration Gateway | ASP.NET Core 10, HttpClientFactory |
+| Frontends | React 19, TypeScript, Vite, Vanilla CSS |
+| Database Engines | Microsoft SQL Server Express, PostgreSQL 15, MongoDB 6.0 |
+| Containerization | Docker, Docker Compose |
 
 ---
 
-## 🌿 Branching Strategy (Git Flow)
+## Branching Strategy
+
+The repository follows a Git Flow branching model:
 
 ```text
-feature/foms-backend ──────┐
-feature/foms-frontend ─────┤
-feature/speedpay ──────────┤
-feature/ai-service ────────┼──→ develop ──→ integration testing ──→ main
-feature/ai-gateway ────────┤
-feature/ai-frontend ───────┤
-feature/docker-integration─┘
+feature/foms-backend ------+
+feature/foms-frontend -----+
+feature/speedpay ----------+
+feature/ai-service --------+---> develop ---> integration testing ---> main
+feature/ai-gateway --------+
+feature/ai-frontend -------+
+feature/docker-integration-+
 ```
 
-### Branches & Purpose
-
-| Branch | Purpose |
+| Branch | Description |
 |---|---|
-| `main` | Production-ready stable release |
-| `develop` | Integrated working branch for all services |
-| `feature/foms-frontend` | FOMS staff frontend development |
-| `feature/foms-backend` | FOMS .NET backend development |
-| `feature/speedpay` | SpeedPay client portal development |
-| `feature/ai-service` | Python FastAPI AI service |
-| `feature/ai-gateway` | ASP.NET Core AI gateway |
-| `feature/ai-frontend` | AI dashboard frontend |
-| `feature/docker-integration` | Docker configuration and service management |
+| `main` | Production-ready, validated releases |
+| `develop` | Primary integration branch for active development |
+| `feature/foms-frontend` | Staff application frontend development |
+| `feature/foms-backend` | Core .NET financial backend development |
+| `feature/speedpay` | SpeedPay client payment interface |
+| `feature/ai-service` | Python FastAPI intelligence service |
+| `feature/ai-gateway` | .NET integration gateway |
+| `feature/ai-frontend` | Intelligence dashboard frontend |
+| `feature/docker-integration` | Infrastructure and containerization configurations |
 
 ---
 
-## 🚀 Getting Started & How to Run
+## Local Development Setup
 
-### 1. Clone & Configure Environment
+### 1. Environment Configuration
+Clone the repository and copy the environment template:
+
 ```bash
 git clone https://github.com/crystalyjoyce/FOMS-System-Repository.git
 cd FOMS-System-Repository
 cp .env.example .env
 ```
-*Ensure `.env` contains your local database settings and Gemini API key.*
 
-### 2. Start Supporting Databases (Docker)
+Ensure `.env` contains valid credentials for SQL Server, PostgreSQL, MongoDB, and the Gemini API key.
+
+### 2. Infrastructure Services (Docker)
+Start the supporting containerized databases:
+
 ```bash
 docker-compose up -d
 ```
-*Starts PostgreSQL (`5432`), pgAdmin (`5050`), and MongoDB (`27017`). Microsoft SQL Server runs locally via `localhost\SQLEXPRESS`.*
 
-### 3. Start Backend Services
-Open separate terminals for each backend:
+This initializes PostgreSQL (`5432`), MongoDB (`27017`), and pgAdmin (`5050`). Microsoft SQL Server is managed locally through your SQL Server Express instance (`localhost\SQLEXPRESS`).
 
-* **FOMS Backend API:**
+### 3. Backend Services
+Run each backend service in a dedicated terminal window:
+
+* **FOMS Core Backend API:**
   ```bash
   cd foms-backend/FOMS.Api
   dotnet run
   ```
-  *(Runs on http://localhost:5007)*
+  Endpoint: `http://localhost:5007`
 
-* **AI Gateway:**
+* **AI Integration Gateway:**
   ```bash
   cd ai-gateway
   dotnet run
   ```
-  *(Runs on http://localhost:5000)*
+  Endpoint: `http://localhost:5000`
 
-* **AI Python Microservice:**
+* **AI Microservice:**
   ```bash
   cd ai-service
   py -m uvicorn app.main:app --reload
   ```
-  *(Runs on http://localhost:8000)*
+  Endpoint: `http://localhost:8000`
 
-### 4. Start Frontend Applications
-Open separate terminals for each frontend:
+### 4. Frontend Applications
+Run each frontend application in a dedicated terminal window:
 
 * **FOMS Staff Portal:**
   ```bash
@@ -161,7 +165,7 @@ Open separate terminals for each frontend:
   npm install
   npm run dev
   ```
-  *(Runs on http://localhost:5173)*
+  Accessible at: `http://localhost:5173`
 
 * **SpeedPay Client Portal:**
   ```bash
@@ -169,7 +173,7 @@ Open separate terminals for each frontend:
   npm install
   npm run dev
   ```
-  *(Runs on http://localhost:5174)*
+  Accessible at: `http://localhost:5174`
 
 * **AI Intelligence Dashboard:**
   ```bash
@@ -177,4 +181,4 @@ Open separate terminals for each frontend:
   npm install
   npm run dev
   ```
-  *(Runs on http://localhost:5175)*
+  Accessible at: `http://localhost:5175`

@@ -375,15 +375,22 @@ public class AuthService : IAuthService
 
     private async Task WriteAuditAsync(string userId, string entityId, string action, string details)
     {
-        var audit = new AuditLog
+        try
         {
-            UserId = userId,
-            EntityName = "Employee",
-            EntityId = entityId,
-            Action = action,
-            Details = details,
-            LoggedAt = DateTime.UtcNow
-        };
-        await _context.AuditLogs.AddAsync(audit);
+            var audit = new AuditLog
+            {
+                UserId = userId,
+                EntityName = "Employee",
+                EntityId = entityId,
+                Action = action,
+                Details = details,
+                LoggedAt = DateTime.UtcNow
+            };
+            await _context.AuditLogs.AddAsync(audit);
+        }
+        catch
+        {
+            // Logging failure must never fail the authentication transaction
+        }
     }
 }

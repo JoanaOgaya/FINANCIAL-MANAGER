@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import { useClientContext } from '../context/ClientContext';
 import { useNavigate } from 'react-router-dom';
 import { Search, ChevronDown, ChevronUp, UploadCloud, X, Camera, CheckCircle2, Clock, AlertTriangle } from 'lucide-react';

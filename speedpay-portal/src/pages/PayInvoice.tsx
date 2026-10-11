@@ -236,7 +236,7 @@ export const PayInvoice: React.FC = () => {
                 </div>
 
                 {/* Per-waybill breakdown */}
-                {MOCK_WAYBILLS.map((wb, idx) => {
+                {MOCK_WAYBILLS.map((wb) => {
                   const subtotal = wb.freight + wb.valuation + wb.oda;
                   const vatAmt = subtotal * (wb.vat / 100);
                   const total = subtotal + vatAmt;

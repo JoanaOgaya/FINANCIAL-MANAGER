@@ -59,6 +59,8 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
     {
         base.OnModelCreating(modelBuilder);
 
+        modelBuilder.Entity<AuditLog>().ToTable("AppAuditLogs");
+
         modelBuilder.Entity<PaymentTransaction>(entity =>
         {
             entity.HasOne(t => t.Client)
