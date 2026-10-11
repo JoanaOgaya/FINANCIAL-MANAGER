@@ -6,11 +6,15 @@ import { CalendarPicker } from '../components/FormModals';
 import '../components/FormModals.css';
 
 /* ─── helpers ─── */
-const fmtDate = (ts: string) =>
-  new Date(ts).toLocaleString('en-US', {
+const fmtDate = (ts: string) => {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return '—';
+  return d.toLocaleString('en-US', {
     month: 'numeric', day: 'numeric', year: 'numeric',
     hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true,
   });
+};
 
 const ACTION_LABEL: Record<string, string> = {
   DOCUMENT_UPLOADED:                   'Uploaded a document',

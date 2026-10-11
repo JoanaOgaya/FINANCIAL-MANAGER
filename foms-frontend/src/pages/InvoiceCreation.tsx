@@ -30,9 +30,9 @@ export const InvoiceCreation: React.FC = () => {
   const { data: invoicesData, refetch: refetchInvoices } = useQuery('invcreate:invoices', () => invoicesService.list({ pageSize: 200 }));
   const { data: clientsData } = useQuery('invcreate:clients', () => clientsService.list({ pageSize: 100 }));
 
-  const waybills: Waybill[] = waybillsData?.items || [];
-  const invoices: Invoice[] = invoicesData?.items || [];
-  const clients: Client[] = clientsData?.items || [];
+  const waybills: Waybill[] = useMemo(() => waybillsData?.items || [], [waybillsData?.items]);
+  const invoices: Invoice[] = useMemo(() => invoicesData?.items || [], [invoicesData?.items]);
+  const clients: Client[] = useMemo(() => clientsData?.items || [], [clientsData?.items]);
 
   const [searchParams] = useSearchParams();
   const editInvoiceId = searchParams.get('edit');
@@ -79,7 +79,8 @@ export const InvoiceCreation: React.FC = () => {
     if (issueDate) {
       const d = new Date(issueDate);
       d.setDate(d.getDate() + 30);
-      setDueDate(d.toISOString().split('T')[0]);
+      const nextDue = d.toISOString().split('T')[0];
+      setDueDate(prev => (prev === nextDue ? prev : nextDue));
     }
   }, [issueDate]);
 
@@ -215,18 +216,18 @@ export const InvoiceCreation: React.FC = () => {
       setPeriodOptions(options);
 
       if (options.length > 0) {
-        if (!options.find(o => o.label === billingPeriod)) {
+        if (!options.some(o => o.label === billingPeriod)) {
           setBillingPeriod(options[0].label);
           setSelectedPeriodInfo(options[0]);
           setIssueDate(options[0].end.toISOString().split('T')[0]);
         }
       }
     } else {
-      setPeriodOptions([]);
-      setBillingPeriod('');
-      setSelectedPeriodInfo(null);
+      setPeriodOptions(prev => (prev.length === 0 ? prev : []));
+      setBillingPeriod(prev => (prev === '' ? prev : ''));
+      setSelectedPeriodInfo(prev => (prev === null ? prev : null));
     }
-  }, [selectedWaybills, derivedBillingSchedule, waybills, billingPeriod]);
+  }, [selectedWaybills, derivedBillingSchedule, waybills]);
 
   const isDateInvalid = new Date(dueDate) < new Date(issueDate);
   const isBillingPeriodInvalid = !billingPeriod;
