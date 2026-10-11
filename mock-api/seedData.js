@@ -38,7 +38,7 @@ export function createSeedData() {
       username: 'EMP-004',
       password: 'Password@123',
       fullName: 'Joana Marie Ogaya',
-      role: 'FINANCIAL_MANAGER',
+      role: 'ASSISTANT_FM',
       email: 'joana@foms.local',
       status: 'Active',
     },

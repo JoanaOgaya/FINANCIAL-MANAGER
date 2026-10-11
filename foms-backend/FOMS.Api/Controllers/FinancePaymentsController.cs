@@ -514,9 +514,9 @@ public class FinancePaymentsController : ControllerBase
         var role = User.FindFirst(ClaimTypes.Role)?.Value ?? "Unknown Role";
         var user = User.FindFirst("name")?.Value ?? User.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown User";
 
-        var allowedRoles = new[] { "Accountant", "Assistant of Financial Manager", "Coordinator" };
+        var allowedRoles = new[] { "Accountant", "Assistant Financial Manager", "Assistant Finance Manager", "Assistant of Financial Manager", "Coordinator" };
         if (!allowedRoles.Contains(role))
-            return StatusCode(403, new { message = "Only Accountant, Assistant of Financial Manager, or Coordinator are authorized for initial review." });
+            return StatusCode(403, new { message = "Only Accountant, Assistant Financial Manager, or Coordinator are authorized for initial review." });
 
         if (request == null || string.IsNullOrWhiteSpace(request.Status))
             return BadRequest(new { message = "Status (Pending Finance Validation or Returned / Needs Correction) is required." });

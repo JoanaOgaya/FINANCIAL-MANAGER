@@ -56,7 +56,7 @@ public static class ApplicationDbContextSeed
             {
                 Id = "EMP-004",
                 Name = "Joana Marie Ogaya",
-                Role = "Financial Manager",
+                Role = "Assistant Financial Manager",
                 Email = "joana@foms.local",
                 SystemAccess = "Finance Operation Service",
                 Status = "Active",
