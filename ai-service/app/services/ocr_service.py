@@ -74,8 +74,15 @@ def extract_document_fields(file_bytes: bytes, filename: str, mime_type: str = "
     gemini_api_key = os.getenv("GEMINI_API_KEY", "") or os.getenv("GOOGLE_API_KEY", "")
     gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 
-    # Attempt Gemini API if key is a valid Google AI Studio key (starts with AIzaSy)
-    if gemini_api_key and gemini_api_key.startswith("AIzaSy"):
+    # Attempt Gemini API if key is valid (supports modern AQ. and legacy AIzaSy keys)
+    has_valid_key = bool(
+        gemini_api_key
+        and not gemini_api_key.startswith("your-")
+        and not gemini_api_key.startswith("<")
+        and (gemini_api_key.startswith("AIzaSy") or gemini_api_key.startswith("AQ.") or len(gemini_api_key) > 20)
+    )
+
+    if has_valid_key:
         try:
             # Handle mime type fallback
             if not mime_type or mime_type == "application/octet-stream":
@@ -107,8 +114,15 @@ def extract_document_fields(file_bytes: bytes, filename: str, mime_type: str = "
                 "x-goog-api-key": gemini_api_key
             }
 
+            # Modern AQ. keys use x-goog-api-key header; legacy keys can pass query param
+            endpoint_url = (
+                f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent"
+                if gemini_api_key.startswith("AQ.")
+                else f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_api_key}"
+            )
+
             response = requests.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_api_key}",
+                endpoint_url,
                 headers=headers,
                 json=payload,
                 timeout=60
@@ -171,7 +185,7 @@ def extract_document_fields(file_bytes: bytes, filename: str, mime_type: str = "
 
     else:
         logger.info(
-            "[OCR] No valid Gemini AIzaSy API key configured. Using resilient visual heuristic document classifier."
+            "[OCR] No valid Gemini API key configured. Using resilient visual heuristic document classifier."
         )
 
     # Resilient fallback: classify file deterministically based on document markers

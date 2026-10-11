@@ -2,7 +2,7 @@ import psycopg2
 import json
 from datetime import datetime
 
-CONN_STR = "postgresql://postgres:hanamarie@localhost:5432/foms_ai_db"
+CONN_STR = "postgresql://postgres:Crystalyn Joyce@localhost:5432/foms_ai_db"
 
 def seed_ai_data():
     try:
