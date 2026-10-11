@@ -1,56 +1,150 @@
 """
-FOMS AI Service — User Seed Script
-Creates and seeds the 'users' table in the foms_ai_db PostgreSQL database.
-Run once: python seed_users.py
+FOMS AI Service — User Sync & Seed Script
+Synchronizes official backend users from Microsoft SQL Server (FOMS_DB / FOMS.Api)
+into the 'users' table in the foms_ai_results PostgreSQL database.
+
+Run:
+    py seed_users.py
 """
 
+import os
+import sys
+import json
 import psycopg2
 import bcrypt
-import sys
+import urllib.request
+import urllib.error
 
-# ── Config ─────────────────────────────────────────────────────────────────
+# ── Database Configuration ──────────────────────────────────────────────────
+# Default connects to PostgreSQL container on 5432
 DB_CONFIG = {
-    "host": "127.0.0.1",
-    "port": 5432,
-    "user": "postgres",
-    "password": "Postgres2026!",
-    "dbname": "foms_ai_results"
+    "host": os.getenv("POSTGRES_HOST", "127.0.0.1"),
+    "port": int(os.getenv("POSTGRES_PORT", "5432")),
+    "user": os.getenv("POSTGRES_USER", "postgres"),
+    "password": os.getenv("POSTGRES_PASSWORD", "Postgres2026!"),
+    "dbname": os.getenv("POSTGRES_DB", "foms_ai_results")
 }
 
-def hash_password(plain: str) -> str:
-    return bcrypt.hashpw(plain.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-
-# ── Users to seed ───────────────────────────────────────────────────────────
-# password_version=2 means password already changed (no forced change on login)
-USERS = [
-    # login_id,  full_name,                           role_name,                        password,        pw_version, must_change
-    ("EMP-001",  "Maria Mariel Jane Anonuevo",        "Finance Manager",                "Password@123",  2,          False),
-    ("EMP-002",  "Ronalyn Mamaril",                   "Head Accountant",                "Password@123",  2,          False),
-    ("EMP-003",  "Hannah Grace Ibanez",               "Accountant",                     "Password@123",  2,          False),
-    ("EMP-004",  "Kathleen Grace Caguioa",            "Coordinator",                    "Password@123",  2,          False),
-    ("EMP-005",  "Pedro Santos",                      "Assistant of Finance Manager",   "Password@123",  2,          False),
-    ("EMP-006",  "Client User",                       "Client",                         "Password@123",  2,          False),
-    ("EMP-007",  "Carlos Garcia",                     "Coordinator",                    "Password@123",  2,          False),
-    # Client accounts
-    ("CA-001",   "Lazada Philippines",                "Client",                         "Password@123",  2,          False),
-    ("CA-002",   "Shopee Philippines",                "Client",                         "Password@123",  2,          False),
-    ("CA-003",   "TikTok Shop Philippines",           "Client",                         "Password@123",  2,          False),
+# ── Official FOMS Backend Users (Reference Source: dbo.Employees / FOMS_DB) ─
+# Used directly or as deterministic fallback if backend service is unreachable
+BACKEND_USERS_REFERENCE = [
+    {
+        "id": "EMP-001",
+        "fullName": "Crystalyn Joyce C. Fajardo",
+        "role": "Finance Manager",
+        "email": "crystalyn@foms.local",
+        "password": "Password@123"
+    },
+    {
+        "id": "EMP-002",
+        "fullName": "Misty",
+        "role": "Head Accountant",
+        "email": "misty@foms.local",
+        "password": "Password@123"
+    },
+    {
+        "id": "EMP-003",
+        "fullName": "Maria Mariel Jane Anonuevo",
+        "role": "Accountant",
+        "email": "mariel@foms.local",
+        "password": "Password@123"
+    },
+    {
+        "id": "EMP-004",
+        "fullName": "Joana Marie Ogaya",
+        "role": "Assistant Financial Manager",
+        "email": "joana@foms.local",
+        "password": "Password@123"
+    }
 ]
 
+def hash_password(plain: str) -> str:
+    """Hashes password using bcrypt for AI Service authentication."""
+    return bcrypt.hashpw(plain.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+def fetch_users_from_backend(base_url: str = "http://localhost:5007"):
+    """
+    Attempts to fetch live users directly from the FOMS Core Backend API.
+    Returns list of user dictionaries or None if unreachable.
+    """
+    login_url = f"{base_url}/api/auth/login"
+    users_url = f"{base_url}/api/users"
+
+    try:
+        # Step 1: Login to get JWT Bearer token
+        login_payload = json.dumps({"Username": "EMP-001", "Password": "Password@123"}).encode('utf-8')
+        req = urllib.request.Request(
+            login_url,
+            data=login_payload,
+            headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            token = data.get("data", {}).get("accessToken")
+
+        if not token:
+            return None
+
+        # Step 2: Fetch all users using Bearer token
+        users_req = urllib.request.Request(
+            users_url,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {token}"
+            }
+        )
+        with urllib.request.urlopen(users_req, timeout=3) as resp:
+            users_data = json.loads(resp.read().decode('utf-8'))
+            print(f"[INFO] Successfully fetched {len(users_data)} users live from Backend API ({base_url})")
+            return users_data
+    except Exception as ex:
+        print(f"[INFO] Could not fetch live from Backend API ({ex}). Using official backend reference users.")
+        return None
+
 def main():
-    print("Connecting to foms_ai_db at 127.0.0.1:5433...")
+    print("=" * 60)
+    print("FOMS AI Service — Synchronizing Official Backend Users")
+    print("=" * 60)
+
+    # 1. Fetch live or use official backend reference
+    live_users = fetch_users_from_backend()
+    users_to_seed = []
+
+    if live_users:
+        for u in live_users:
+            users_to_seed.append((
+                u.get("id") or u.get("username"),
+                u.get("fullName") or u.get("name"),
+                u.get("role"),
+                "Password@123",
+                u.get("email", ""),
+                2,
+                False
+            ))
+    else:
+        for u in BACKEND_USERS_REFERENCE:
+            users_to_seed.append((
+                u["id"],
+                u["fullName"],
+                u["role"],
+                u["password"],
+                u["email"],
+                2,
+                False
+            ))
+
+    # 2. Connect to PostgreSQL
+    print(f"\nConnecting to PostgreSQL at {DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['dbname']}...")
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         conn.autocommit = True
         cur = conn.cursor()
-        print("Connected!")
+        print("Connected successfully!")
     except Exception as e:
-        print(f"ERROR: Cannot connect to database: {e}")
+        print(f"ERROR: Cannot connect to PostgreSQL: {e}")
         sys.exit(1)
 
-    # ── Create users table ───────────────────────────────────────────────────
-    print("Creating 'users' table...")
-    cur.execute("DROP TABLE IF EXISTS users CASCADE;")
+    # 3. Ensure 'users' table exists
     cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id                  SERIAL PRIMARY KEY,
@@ -67,49 +161,57 @@ def main():
             created_at          TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
         );
     """)
-    print("Table created (or already exists).")
 
-    # ── Seed users ───────────────────────────────────────────────────────────
-    print("\nSeeding users...")
-    inserted = 0
-    skipped = 0
+    # 4. Clean previous outdated/mock users to ensure exact backend parity
+    valid_login_ids = [u[0] for u in users_to_seed]
+    cur.execute("DELETE FROM users WHERE login_id NOT IN %s;", (tuple(valid_login_ids),))
 
-    for login_id, full_name, role_name, password, pw_version, must_change in USERS:
-        # Check if user already exists
+    # 5. Insert or update users
+    print("\nUpdating users from backend source:")
+    updated_count = 0
+
+    for login_id, full_name, role_name, password, email, pw_version, must_change in users_to_seed:
         cur.execute("SELECT id FROM users WHERE login_id = %s", (login_id,))
         existing = cur.fetchone()
 
-        if existing:
-            print(f"  SKIP: {login_id} ({full_name}) — already exists")
-            skipped += 1
-            continue
-
         pw_hash = hash_password(password)
-        cur.execute("""
-            INSERT INTO users (login_id, full_name, role_name, password_hash, password_version, must_change_password)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        """, (login_id, full_name, role_name, pw_hash, pw_version, must_change))
 
-        print(f"  [OK] Inserted: {login_id} ({full_name}) - Role: {role_name}")
+        if existing:
+            cur.execute("""
+                UPDATE users SET
+                    full_name = %s,
+                    role_name = %s,
+                    email = %s,
+                    password_hash = %s,
+                    password_version = %s,
+                    must_change_password = %s,
+                    is_active = TRUE
+                WHERE login_id = %s
+            """, (full_name, role_name, email, pw_hash, pw_version, must_change, login_id))
+            print(f"  [UPDATED] {login_id:<10} | {full_name:<30} | {role_name}")
+        else:
+            cur.execute("""
+                INSERT INTO users (login_id, full_name, role_name, email, password_hash, password_version, must_change_password)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (login_id, full_name, role_name, email, pw_hash, pw_version, must_change))
+            print(f"  [INSERTED] {login_id:<10} | {full_name:<30} | {role_name}")
 
-        inserted += 1
+        updated_count += 1
 
-    # ── Verify ───────────────────────────────────────────────────────────────
-    cur.execute("SELECT login_id, full_name, role_name, password_version FROM users ORDER BY login_id;")
+    # 6. Display current database contents
+    cur.execute("SELECT login_id, full_name, role_name, email, is_active FROM users ORDER BY login_id;")
     rows = cur.fetchall()
 
-    print(f"\n{'='*60}")
-    print(f"SEED COMPLETE: {inserted} inserted, {skipped} skipped")
-    print(f"{'='*60}")
-    print(f"\nAll users in 'users' table:")
+    print(f"\n{'='*75}")
+    print(f"SYNC COMPLETE: {len(rows)} verified backend users in 'users' table")
+    print(f"{'='*75}")
     for row in rows:
-        print(f"  {row[0]:<12} | {row[1]:<35} | {row[2]:<35} | v{row[3]}")
+        active = "Active" if row[4] else "Inactive"
+        print(f"  {row[0]:<10} | {row[1]:<30} | {row[2]:<28} | {active}")
 
     cur.close()
     conn.close()
-    print("\nDone! You can now log in to the AI Frontend with:")
-    print("  Employee ID: EMP-001")
-    print("  Password:    Password@123")
+    print("\nOfficial Backend Users are now synchronized and ready!")
 
 if __name__ == "__main__":
     main()

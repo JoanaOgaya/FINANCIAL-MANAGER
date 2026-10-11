@@ -9,166 +9,271 @@ An enterprise financial management platform that integrates the core Finance Ope
 ```text
 FOMS-System-Repository/
 |
-+-- foms-frontend/              Staff Operations & AI Intelligence Web App (React, TypeScript)
-+-- foms-backend/               Core Financial Web API (.NET 10, EF Core, SQL Server)
++-- foms-frontend/              Staff Operations & AI Intelligence Web App (React, TypeScript, Vite)
++-- foms-backend/               Core Financial Web API (.NET 10, EF Core 9, SQL Server)
 |   +-- FOMS.Api/               API Entry Point, Controllers, and Middleware
-+-- speedpay-portal/            Client Self-Service Payment Portal (React, TypeScript)
-+-- ai-service/                 AI Intelligence Engine & Document Processing (Python FastAPI)
-+-- ai-gateway/                 Integration Gateway (.NET 10)
+|   +-- FOMS.Application/       Business Logic, DTOs, and Service Interfaces
+|   +-- FOMS.Domain/            Domain Entities, Value Objects, and Enums
+|   +-- FOMS.Infrastructure/    EF Core DbContexts, MSSQL Repositories, and External Clients
++-- speedpay-portal/            Client Self-Service Payment Portal (React, TypeScript, Vite)
++-- ai-service/                 AI Intelligence Engine & Document Processing (Python FastAPI, Gemini)
++-- ai-gateway/                 Integration Gateway (.NET 10 Web API)
 +-- scripts/                    Database Seeding and Diagnostic Utilities
 +-- docker-compose.yml          Container orchestration for PostgreSQL, MongoDB, and pgAdmin
 +-- .env.example                Environment configuration template
-+-- .env                        Local configuration (gitignored)
-+-- README.md                   System documentation
++-- .env                        Active local environment configuration
++-- README.md                   System documentation and run guides
 ```
 
 ---
 
 ## Service Endpoints and Port Allocation
 
-| Component | Layer / Framework | Host / Port | Default URL |
-|---|---|---|---|
-| FOMS Staff Portal (with AI Layer) | Frontend (Vite, React) | Localhost:5173 | http://localhost:5173 |
-| SpeedPay Client Portal | Frontend (Vite, React) | Localhost:5174 | http://localhost:5174 |
-| FOMS Core Backend API | Backend (.NET 10 Web API) | Localhost:5007 | http://localhost:5007/api |
-| AI Integration Gateway | Gateway API (.NET 10) | Localhost:5000 | http://localhost:5000 |
-| AI Microservice Engine | Backend (Python FastAPI) | Localhost:8000 | http://localhost:8000 |
-| Swagger API Documentation | Interactive Documentation | Localhost:8000 | http://localhost:8000/docs |
-| pgAdmin 4 Administration | Database Console (Docker) | Localhost:5050 | http://localhost:5050 |
+| Component | Layer / Framework | Host / Port | Default URL | Description |
+|---|---|---|---|---|
+| **FOMS Staff Portal** | Frontend (Vite, React) | `localhost:5173` | http://localhost:5173 | Financial operations, invoice management, AI dashboard |
+| **SpeedPay Client Portal** | Frontend (Vite, React) | `localhost:5174` | http://localhost:5174 | Client self-service invoice settlement via PayMongo |
+| **FOMS Core Backend API** | Backend (.NET 10 Web API) | `localhost:5007` | http://localhost:5007/api | Primary transactional REST API connected to MSSQL |
+| **AI Integration Gateway** | Gateway API (.NET 10) | `localhost:5000` | http://localhost:5000 | Reverse proxy & RBAC mediator between frontends & AI |
+| **AI Microservice Engine** | Backend (Python FastAPI) | `localhost:8000` | http://localhost:8000 | OCR, duplicate detection, risk scoring with Gemini |
+| **Swagger API Documentation** | Interactive Documentation | `localhost:8000` | http://localhost:8000/docs | FastAPI interactive API documentation |
+| **pgAdmin 4 Administration** | Database Console (Docker) | `localhost:5050` | http://localhost:5050 | PostgreSQL visual management dashboard |
 
 ---
 
-## Database Architecture
+## Database Architecture (Polyglot Persistence)
 
-The architecture implements a polyglot persistence strategy designed for separation of concerns and operational compliance:
+The architecture implements a polyglot persistence strategy designed for operational compliance, auditability, and separation of concerns:
 
-| Database Engine | Deployment Mode | Database Name | Responsibility |
-|---|---|---|---|
-| Microsoft SQL Server | Local Service (`localhost\SQLEXPRESS`) | `FOMS_DB` | Primary source of truth for accounts, invoices, billing records, payments, and audit logs |
-| PostgreSQL 15 | Docker Container (`localhost:5432`) | `foms_ai_results` | Storage for AI processing results, document OCR extractions, and duplicate detection records |
-| MongoDB 6.0 | Docker Container (`localhost:27017`) | `foms_trends_db` | High-throughput time-series metrics, historical activity logs, and trend analytics |
+| Database Engine | Deployment Mode | Database Name | Responsibility | Connection String |
+|---|---|---|---|---|
+| **Microsoft SQL Server** | Local Windows Service (`localhost\SQLEXPRESS`) | `FOMS_DB` | **Official Source of Truth** for all financial records, roles, users, clients, rate cards, invoices, accounts receivable, payments, payment history, notifications, and tamper-evident audit logs. | `Server=localhost\SQLEXPRESS;Database=FOMS_DB;Trusted_Connection=True;TrustServerCertificate=True;` |
+| **PostgreSQL 15** | Docker Container | `foms_ai_results` | Analytical datastore for AI processing outputs, OCR extractions, duplicate payment hashes, and credit scoring records. | `postgresql://postgres:postgres@localhost:5432/foms_ai_results` |
+| **MongoDB 6.0** | Docker Container | `foms_trends_db` | High-throughput telemetry, historical activity metrics, and time-series audit event trails. | `mongodb://root:mongo_password_2026@localhost:27017/foms_trends_db?authSource=admin` |
 
----
-
-## System Capabilities
-
-### 1. Finance Operations Management System (FOMS)
-* **Accounts Receivable and Invoicing**: Automated billing schedules, customizable client rate cards, VAT computation, and aging analysis.
-* **Waybill and Delivery Verification**: Tracking and lifecycle management of Waybills and Proof of Delivery (POD) documentation.
-* **Digital Payment Processing**: Integrated checkout gateway via PayMongo supporting card payments, e-wallets (GCash, Maya), and bank transfers.
-* **Settlement and Receipt Issuance**: Generation of Official Receipts (OR) upon validated payment confirmation and reconciliation.
-* **Compliance and Auditability**: Role-based access control (RBAC) and tamper-evident audit logging for financial governance.
-
-### 2. Financial Intelligence Layer
-* **Document Extraction and Classification**: Automated financial receipt and invoice OCR powered by Google Gemini API with fallback parsers.
-* **Duplicate Detection**: Levenshtein distance and fuzzy matching algorithms to identify potential fraudulent or redundant payment submissions.
-* **Credit Risk and Delinquency Analysis**: Algorithmic scoring that evaluates client settlement history and predicts payment defaults.
-* **Advisory Recommendations**: Data-driven collection recommendations provided to staff without modifying transactional source-of-truth records.
+> [!IMPORTANT]
+> **Transactional Integrity**: Official FOMS records (invoices, payments, clients, audit logs) are strictly persisted to Microsoft SQL Server (`FOMS_DB`). PostgreSQL and MongoDB serve exclusively as AI decision-support and telemetry databases.
 
 ---
 
-## Technology Stack
+## Microsoft SQL Server Schema (`FOMS_DB`)
 
-| Domain | Technologies |
-|---|---|
-| Core Backend | C# .NET 10, ASP.NET Core Web API, Entity Framework Core 9 |
-| AI Microservice | Python 3.12+, FastAPI, Google Gemini API, Pandas, RapidFuzz |
-| Integration Gateway | ASP.NET Core 10, HttpClientFactory |
-| Frontends | React 19, TypeScript, Vite, Vanilla CSS |
-| Database Engines | Microsoft SQL Server Express, PostgreSQL 15, MongoDB 6.0 |
-| Containerization | Docker, Docker Compose |
+The primary database `FOMS_DB` contains the following core tables:
+- `dbo.Roles` - System roles and access tiers (Financial Manager, Head Accountant, Accountant, Coordinator, Staff).
+- `dbo.Users` - System credentials, employee numbers, and active account flags.
+- `dbo.Clients` - Client profiles, DMS sync status, and contact records.
+- `dbo.ClientFinanceSettings` - Billing terms, payment credit days, VAT/tax types, and ODA rates.
+- `dbo.ClientRates` - Service types, delivery areas, minimum weights, and rate matrices.
+- `dbo.Invoices` - Invoicing records, VAT computation, subtotal, total amounts, and statuses.
+- `dbo.AccountsReceivable` - Outstanding balances, aging buckets, and collection tracking.
+- `dbo.Payments` - Payment records, PayMongo reference IDs, payment methods, and validation states.
+- `dbo.PaymentHistory` - Immutable chronological ledger of payment status transitions.
+- `dbo.Notifications` - Role-targeted system notifications and alerts.
+- `dbo.AuditLogs` - Audit ledger (`audit_id`, `user_id`, `role`, `action`, `module`, `remarks`, `created_at`).
 
 ---
 
-## Branching Strategy
+## Database Health & Verification Endpoints
 
-The repository follows a Git Flow branching model:
+The core backend exposes dedicated endpoints to verify Microsoft SQL Server connectivity and transactional read/write operations:
 
-```text
-feature/foms-backend ------+
-feature/foms-frontend -----+
-feature/speedpay ----------+
-feature/ai-service --------+---> develop ---> integration testing ---> main
-feature/ai-gateway --------+
-feature/ai-frontend -------+
-feature/docker-integration-+
+### 1. Database Health Check
+- **Endpoint:** `GET /api/health/database`
+- **URL:** `http://localhost:5007/api/health/database`
+- **Success Response:**
+  ```json
+  {
+    "success": true,
+    "database": "FOMS_DB",
+    "provider": "Microsoft SQL Server",
+    "server": "localhost\\SQLEXPRESS",
+    "status": "Connected"
+  }
+  ```
+
+### 2. Read Audit Logs (MSSQL Query)
+- **Endpoint:** `GET /api/test/audit-logs`
+- **URL:** `http://localhost:5007/api/test/audit-logs`
+- **Success Response:**
+  ```json
+  {
+    "success": true,
+    "source": "Microsoft SQL Server",
+    "database": "FOMS_DB",
+    "table": "AuditLogs",
+    "count": 2,
+    "data": [
+      {
+        "audit_id": 1,
+        "role": "System Admin",
+        "action": "DATABASE_CREATED",
+        "module": "MSSQL Setup",
+        "remarks": "FOMS_DB local database created successfully."
+      }
+    ]
+  }
+  ```
+
+### 3. Insert Audit Log (MSSQL Transaction)
+- **Endpoint:** `POST /api/test/audit-logs`
+- **URL:** `http://localhost:5007/api/test/audit-logs`
+- **Payload:**
+  ```json
+  {
+    "role": "Backend Test",
+    "action": "BACKEND_CONNECTED",
+    "module": "MSSQL Connection",
+    "remarks": "Backend successfully connected to local FOMS_DB."
+  }
+  ```
+- **Success Response:**
+  ```json
+  {
+    "success": true,
+    "message": "Audit log inserted successfully.",
+    "data": {
+      "role": "Backend Test",
+      "action": "BACKEND_CONNECTED",
+      "module": "MSSQL Connection",
+      "remarks": "Backend successfully connected to local FOMS_DB."
+    }
+  }
+  ```
+
+### 4. Verification in SQL Server Management Studio (SSMS)
+Verify data directly in SSMS by executing:
+```sql
+USE FOMS_DB;
+GO
+
+SELECT audit_id, role, action, module, remarks, created_at
+FROM dbo.AuditLogs;
+GO
 ```
-
-| Branch | Description |
-|---|---|
-| `main` | Production-ready, validated releases |
-| `develop` | Primary integration branch for active development |
-| `feature/foms-frontend` | Staff application frontend development |
-| `feature/foms-backend` | Core .NET financial backend development |
-| `feature/speedpay` | SpeedPay client payment interface |
-| `feature/ai-service` | Python FastAPI intelligence service |
-| `feature/ai-gateway` | .NET integration gateway |
-| `feature/ai-frontend` | Intelligence dashboard frontend |
-| `feature/docker-integration` | Infrastructure and containerization configurations |
 
 ---
 
 ## Local Development Setup
 
 ### 1. Environment Configuration
-Clone the repository and copy the environment template:
+Copy the template configuration file to `.env`:
 
 ```bash
-git clone https://github.com/crystalyjoyce/FOMS-System-Repository.git
-cd FOMS-System-Repository
 cp .env.example .env
 ```
 
-Ensure `.env` contains valid credentials for SQL Server, PostgreSQL, MongoDB, and the Gemini API key.
+Key environment configuration variables in `.env`:
+```ini
+# Microsoft SQL Server
+MSSQL_SERVER=localhost\SQLEXPRESS
+MSSQL_DB=FOMS_DB
+MSSQL_CONNECTION_STRING=Server=localhost\SQLEXPRESS;Database=FOMS_DB;Trusted_Connection=True;TrustServerCertificate=True;
+
+# Supporting Databases (Docker)
+POSTGRES_CONNECTION_STRING=postgresql://postgres:postgres@localhost:5432/foms_ai_results
+MONGODB_URI=mongodb://root:mongo_password_2026@localhost:27017/foms_trends_db?authSource=admin
+
+# Core Backend & AI Service
+FOMS_READ_API_URL=http://localhost:5007
+AI_SERVICE_URL=http://localhost:8000
+AI_SERVICE_API_KEY=foms-secret-key-2026
+GEMINI_API_KEY=your-gemini-api-key-here
+GEMINI_MODEL=gemini-2.0-flash
+
+# PayMongo / SpeedPay
+PAYMONGO_SECRET_KEY=sk_test_fyNzfY2nbwdhfgUcoMmWoZJq
+VITE_PAYMONGO_SECRET_KEY=sk_test_fyNzfY2nbwdhfgUcoMmWoZJq
+```
+
+---
 
 ### 2. Infrastructure Services (Docker)
-Start the supporting containerized databases:
+Start PostgreSQL 15, MongoDB 6.0, and pgAdmin 4:
 
 ```bash
 docker-compose up -d
 ```
 
-This initializes PostgreSQL (`5432`), MongoDB (`27017`), and pgAdmin (`5050`). Microsoft SQL Server is managed locally through your SQL Server Express instance (`localhost\SQLEXPRESS`).
+Verify containers are running:
+```bash
+docker-compose ps
+```
+
+---
 
 ### 3. Backend Services
-Run each backend service in a dedicated terminal window:
 
-* **FOMS Core Backend API:**
-  ```bash
-  cd foms-backend/FOMS.Api
-  dotnet run
-  ```
-  Endpoint: `http://localhost:5007`
+Run each backend service in its own terminal:
 
-* **AI Integration Gateway:**
-  ```bash
-  cd ai-gateway
-  dotnet run
-  ```
-  Endpoint: `http://localhost:5000`
+#### A. Core FOMS Web API (.NET 10)
+```bash
+cd foms-backend/FOMS.Api
+dotnet run
+```
+- Listens on: `http://localhost:5007`
+- Verifies connection to `localhost\SQLEXPRESS` and `FOMS_DB`.
 
-* **AI Microservice:**
-  ```bash
-  cd ai-service
-  py -m uvicorn app.main:app --reload
-  ```
-  Endpoint: `http://localhost:8000`
+#### B. AI Integration Gateway (.NET 10)
+```bash
+cd ai-gateway
+dotnet run
+```
+- Listens on: `http://localhost:5000`
+- Relays authenticated requests to the Python AI service.
+
+#### C. AI Microservice Engine (Python FastAPI)
+```bash
+cd ai-service
+py -m uvicorn app.main:app --reload
+```
+- Listens on: `http://localhost:8000`
+- API documentation: `http://localhost:8000/docs`
+
+---
 
 ### 4. Frontend Applications
-Run each frontend application in a dedicated terminal window (only 2 frontends):
 
-* **FOMS Staff Portal (with AI Intelligence Layer):**
-  ```bash
-  cd foms-frontend
-  npm install
-  npm run dev
-  ```
-  Accessible at: `http://localhost:5173`
+Run each frontend application in its own terminal:
 
-* **SpeedPay Client Portal:**
-  ```bash
-  cd speedpay-portal
-  npm install
-  npm run dev
-  ```
-  Accessible at: `http://localhost:5174`
+#### A. FOMS Staff Portal (with AI Layer)
+```bash
+cd foms-frontend
+npm install
+npm run dev
+```
+- Accessible at: `http://localhost:5173`
+- Configured via `foms-frontend/.env` to point to `http://localhost:5007`.
+
+#### B. SpeedPay Client Portal
+```bash
+cd speedpay-portal
+npm install
+npm run dev
+```
+- Accessible at: `http://localhost:5174`
+- Integrated with PayMongo sandbox checkout for digital payments.
+
+---
+
+## Role-Based Access Control (RBAC)
+
+| Role | Core Operations Permissions | AI Intelligence Permissions |
+|---|---|---|
+| **Financial Manager** | Full access to invoices, client rates, approvals, adjustments, and settings | Full AI access: dashboard, collection notices, risk reviews, audit logs, configuration |
+| **Head Accountant** | Invoice validation, accounts receivable, reconciliations, payment approvals | AI dashboard, risk score review, duplicate detection review, limited audit |
+| **Accountant** | Invoice creation, payment verification, delivery document matching | AI dashboard, duplicate detection view, collection notice generation |
+| **Coordinator** | Waybill tracking, POD uploads, client information view | Read-only AI recommendations related to delivery document validation |
+| **Staff** | Basic view permissions according to designated functional workflows | No direct AI operational permissions |
+
+---
+
+## Troubleshooting & FAQ
+
+### SQL Server Connection Issues
+- **Error:** `Cannot connect to localhost\SQLEXPRESS`
+  - Ensure the **SQL Server (SQLEXPRESS)** service is running in Windows Services (`services.msc`).
+  - Verify your Windows user has `sysadmin` or `db_owner` permissions on `FOMS_DB`.
+- **Error:** `The certificate chain was issued by an authority that is not trusted`
+  - Ensure `TrustServerCertificate=True;` is included in the connection string.
+- **Error:** `Invalid object name 'AuditLogs'`
+  - Ensure the active database context is `FOMS_DB` and the table schema `dbo.AuditLogs` is created.
