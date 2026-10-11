@@ -55,25 +55,13 @@ public static class ApplicationDbContextSeed
             new Employee
             {
                 Id = "EMP-004",
-                Name = "Hannah Estrera",
-                Role = "Coordinator",
-                Email = "hannah@foms.local",
-                SystemAccess = "Finance Operation Service",
-                Status = "Active",
-                IsActive = true,
-                Username = "EMP-004",
-                PasswordHash = FOMS.Application.Services.AuthService.HashPassword("Password@123")
-            },
-            new Employee
-            {
-                Id = "EMP-005",
                 Name = "Joana Marie Ogaya",
                 Role = "Financial Manager",
                 Email = "joana@foms.local",
                 SystemAccess = "Finance Operation Service",
                 Status = "Active",
                 IsActive = true,
-                Username = "EMP-005",
+                Username = "EMP-004",
                 PasswordHash = FOMS.Application.Services.AuthService.HashPassword("Password@123")
             }
         };

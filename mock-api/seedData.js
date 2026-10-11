@@ -35,11 +35,11 @@ export function createSeedData() {
     },
     {
       id: 'EMP-004',
-      username: 'afm',
-      password: 'Password@AF2026',
-      fullName: 'Miles Morales',
-      role: 'ASSISTANT_FM',
-      email: 'miles.morales@foms.local',
+      username: 'EMP-004',
+      password: 'Password@123',
+      fullName: 'Joana Marie Ogaya',
+      role: 'FINANCIAL_MANAGER',
+      email: 'joana@foms.local',
       status: 'Active',
     },
   ];
