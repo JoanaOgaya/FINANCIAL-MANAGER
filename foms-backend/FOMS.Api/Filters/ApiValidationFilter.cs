@@ -20,8 +20,13 @@ public class ApiValidationFilter : IAsyncActionFilter
             });
         }
 
-        // 2. Protect against null objects / invalid JSON
-        if (context.ActionArguments.Any(kv => kv.Value == null))
+        // 2. Protect against null objects / invalid JSON for body parameters
+        var bodyParams = context.ActionDescriptor.Parameters
+            .Where(p => p.BindingInfo?.BindingSource?.Id == "Body")
+            .Select(p => p.Name)
+            .ToHashSet();
+
+        if (bodyParams.Count > 0 && context.ActionArguments.Any(kv => bodyParams.Contains(kv.Key) && kv.Value == null))
         {
             throw new ValidationException(new Dictionary<string, string[]> {
                 { "Payload", new[] { "Request payload is invalid or null." } }

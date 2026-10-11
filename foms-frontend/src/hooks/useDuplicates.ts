@@ -69,7 +69,7 @@ function useDuplicateList<T>(
         page,
         pageSize,
         search: applied.search || undefined,
-        [filterParam]: lockedFilter ?? (applied.filter || undefined),
+        [filterParam]: (lockedFilter || applied.filter) ? (lockedFilter || applied.filter) : undefined,
         dateFrom: applied.dateFrom || undefined,
         dateTo: applied.dateTo || undefined,
       });
