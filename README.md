@@ -9,11 +9,10 @@ An enterprise financial management platform that integrates the core Finance Ope
 ```text
 FOMS-System-Repository/
 |
-+-- foms-frontend/              Staff Operations Web Application (React, TypeScript)
++-- foms-frontend/              Staff Operations & AI Intelligence Web App (React, TypeScript)
 +-- foms-backend/               Core Financial Web API (.NET 10, EF Core, SQL Server)
 |   +-- FOMS.Api/               API Entry Point, Controllers, and Middleware
 +-- speedpay-portal/            Client Self-Service Payment Portal (React, TypeScript)
-+-- ai-frontend/                Financial Intelligence Dashboard (React, TypeScript)
 +-- ai-service/                 AI Intelligence Engine & Document Processing (Python FastAPI)
 +-- ai-gateway/                 Integration Gateway (.NET 10)
 +-- scripts/                    Database Seeding and Diagnostic Utilities
@@ -29,9 +28,8 @@ FOMS-System-Repository/
 
 | Component | Layer / Framework | Host / Port | Default URL |
 |---|---|---|---|
-| FOMS Staff Portal | Frontend (Vite, React) | Localhost:5173 | http://localhost:5173 |
+| FOMS Staff Portal (with AI Layer) | Frontend (Vite, React) | Localhost:5173 | http://localhost:5173 |
 | SpeedPay Client Portal | Frontend (Vite, React) | Localhost:5174 | http://localhost:5174 |
-| AI Intelligence Dashboard | Frontend (Vite, React) | Localhost:5175 | http://localhost:5175 |
 | FOMS Core Backend API | Backend (.NET 10 Web API) | Localhost:5007 | http://localhost:5007/api |
 | AI Integration Gateway | Gateway API (.NET 10) | Localhost:5000 | http://localhost:5000 |
 | AI Microservice Engine | Backend (Python FastAPI) | Localhost:8000 | http://localhost:8000 |
@@ -157,9 +155,9 @@ Run each backend service in a dedicated terminal window:
   Endpoint: `http://localhost:8000`
 
 ### 4. Frontend Applications
-Run each frontend application in a dedicated terminal window:
+Run each frontend application in a dedicated terminal window (only 2 frontends):
 
-* **FOMS Staff Portal:**
+* **FOMS Staff Portal (with AI Intelligence Layer):**
   ```bash
   cd foms-frontend
   npm install
@@ -174,11 +172,3 @@ Run each frontend application in a dedicated terminal window:
   npm run dev
   ```
   Accessible at: `http://localhost:5174`
-
-* **AI Intelligence Dashboard:**
-  ```bash
-  cd ai-frontend
-  npm install
-  npm run dev
-  ```
-  Accessible at: `http://localhost:5175`
