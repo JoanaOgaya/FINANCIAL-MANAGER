@@ -2,22 +2,28 @@ import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { DataTable } from '../components/DataTable';
-import { StatusBadge } from '../components/StatusBadge';
+import { StatusBadge } from '../components/shared/StatusBadge';
 import { Button } from '../components/Buttons';
 import { Card } from '../components/Card';
 import { CalendarPicker } from '../components/FormModals';
-import { Waybill } from '../data/seed';
 import { useToast } from '../components/ToastContext';
-import { useAppData } from '../context/AppDataContext';
 import { useAuth } from '../context/AuthContext';
 import { TableContainer } from '../components/TableContainer';
 import { ClientInfoCard } from '../components/ClientInfoCard';
+import { waybillsService } from '../services/waybillsService';
+import { clientsService } from '../services/clientsService';
+import { auditLogsService } from '../services/auditLogsService';
+import { useQuery } from '../hooks/useQuery';
+import { Waybill, Client } from '../types/entities';
+import { LoadingSpinner } from '../components/shared/LoadingSpinner';
+import { useDuplicatePreCheck } from '../hooks/useDuplicatePreCheck';
+import { DuplicatePreCheckModal } from '../components/ai/DuplicatePreCheckModal';
+import { canCheckDuplicateInForm } from '../utils/roleAccess';
 
 const WaybillDetailCard: React.FC<{ waybill: Waybill, onUpdate: (id: string, updates: Partial<Waybill>) => void, userRole?: string }> = ({ waybill, onUpdate, userRole }) => {
   const { toast } = useToast();
   const { user } = useAuth();
   const navigate = useNavigate();
-  const { addAuditLog } = useAppData();
   const [checklist, setChecklist] = useState({
     signature: false,
     waybillMatch: false,
@@ -35,23 +41,24 @@ const WaybillDetailCard: React.FC<{ waybill: Waybill, onUpdate: (id: string, upd
 
   const allChecked = Object.values(checklist).every(Boolean);
 
-  const handleValidate = () => {
+  const handleValidate = async () => {
     if (window.confirm('Confirm this waybill is valid for billing?')) {
       const newStatus = waybill.is_ctc ? 'Validated (CTC)' : 'Validated';
       onUpdate(waybill.id, { status: newStatus as Waybill['status'] });
-      addAuditLog({
-        id: `AL-${Date.now()}`,
-        userId: user?.employeeId || 'U-000',
-        userFullName: user?.fullName || 'System',
-        userRole: user?.role || 'Accountant',
-        action: 'VALIDATE_WAYBILL',
-        module: 'Waybills',
-        recordId: waybill.waybillNumber,
-        recordType: 'Waybill',
-        ipAddress: '127.0.0.1',
-        details: `Validated waybill ${waybill.waybillNumber}`,
-        timestamp: new Date().toISOString()
-      });
+      try {
+        await auditLogsService.create({
+          userId: user?.employeeId || 'U-000',
+          userFullName: user?.fullName || 'System',
+          userRole: user?.role || 'ACCOUNTANT',
+          action: 'VALIDATE_WAYBILL',
+          module: 'Waybills',
+          recordId: waybill.waybillNumber,
+          recordType: 'Waybill',
+          ipAddress: '127.0.0.1',
+          details: `Validated waybill ${waybill.waybillNumber}`,
+          timestamp: new Date().toISOString()
+        });
+      } catch (e) {}
       toast.success(`Waybill ${waybill.waybillNumber} successfully validated.`);
     }
   };
@@ -247,88 +254,63 @@ const WaybillDetailCard: React.FC<{ waybill: Waybill, onUpdate: (id: string, upd
                         <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#92400E', display: 'block', marginBottom: '4px' }}>Additional Remarks</label>
                         <textarea value={ctcForm.additionalRemarks} onChange={e => setCtcForm(p => ({ ...p, additionalRemarks: e.target.value }))} placeholder="Optional notes..." rows={3} style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #FCD34D', background: '#fff', outline: 'none', resize: 'vertical' }} />
                       </div>
-                      <div>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '32px 24px', border: '1px dashed #FCD34D', borderRadius: '12px', background: 'transparent', marginTop: 12 }}>
-                          <div style={{ width: 48, height: 48, borderRadius: '50%', background: '#92400E', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', marginBottom: 4 }}>
-                            <i className="ti ti-cloud-upload" style={{ fontSize: '24px' }} />
-                          </div>
-                          <span style={{ fontSize: '1rem', fontWeight: 700, color: '#92400E' }}>Drag & Drop or Upload Document</span>
-                          <span style={{ fontSize: '0.8rem', color: '#B45309', marginBottom: 12 }}>Support JPG, JPEG, and PNG receipt statements up to 10MB.</span>
-                          
-                          <div style={{ display: 'flex', gap: 12 }}>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#92400E', color: '#fff', padding: '8px 16px', borderRadius: '6px', fontWeight: 600, fontSize: '0.875rem', cursor: 'pointer' }}>
-                              Choose File
-                              <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => {
-                                const file = e.target.files?.[0];
-                                if (file) {
-                                  toast.info('Scanning document for duplicates...');
-                                  setTimeout(() => {
-                                    toast.error('Duplicate detected! Routing to flagged duplicate review.');
-                                    navigate('/flagged-duplicates');
-                                  }, 1500);
-                                }
-                              }} />
-                            </label>
-                            <button type="button" style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: '#92400E', border: '1px solid #FCD34D', padding: '8px 16px', borderRadius: '6px', fontWeight: 600, fontSize: '0.875rem', cursor: 'pointer' }}>
-                              <i className="ti ti-camera" style={{ fontSize: '16px' }} />
-                              Scan Document
-                            </button>
-                          </div>
-                        </div>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
+                        <Button title="Submit CTC" variant="primary" onClick={handleCtcSubmit} disabled={!ctcForm.reason} />
                       </div>
-                      <button onClick={handleCtcSubmit} disabled={!ctcForm.reason} style={{ background: '#92400E', color: '#fff', border: 'none', padding: '10px', borderRadius: '6px', fontWeight: 600, width: '100%', cursor: ctcForm.reason ? 'pointer' : 'not-allowed', opacity: ctcForm.reason ? 1 : 0.6, marginTop: '8px' }}>
-                        Submit CTC
-                      </button>
                     </div>
                   </div>
                 )}
 
                 {activeTab === 'Approve' && (
-                  <div style={{ background: '#F0FDF4', padding: '16px', borderRadius: '8px', border: '1px solid #BBF7D0' }}>
-                    <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: '#166534', margin: '0 0 4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <i className="ti ti-circle-check" /> Document Verified
-                    </h4>
-                    <p style={{ fontSize: '0.8rem', color: '#15803D', margin: '0 0 16px' }}>
-                      The original POD matches the waybill record and is complete.
-                    </p>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                      <div>
-                        <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#166534', display: 'block', marginBottom: '4px' }}>Remarks (optional)</label>
-                        <textarea placeholder="Optional notes for the record..." rows={3} style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #86EFAC', background: '#fff', outline: 'none', resize: 'vertical' }} />
-                      </div>
-                      <button onClick={handleValidate} style={{ background: '#10B981', color: '#fff', border: 'none', padding: '10px', borderRadius: '6px', fontWeight: 600, width: '100%', cursor: 'pointer', marginTop: '8px' }}>
-                        Approve
-                      </button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', background: '#fff', padding: '16px', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                      <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase' }}>Validation Checklist</span>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', color: '#1E293B', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={checklist.signature} onChange={e => setChecklist(p => ({ ...p, signature: e.target.checked }))} />
+                        Receiver signature is clearly legible
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', color: '#1E293B', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={checklist.waybillMatch} onChange={e => setChecklist(p => ({ ...p, waybillMatch: e.target.checked }))} />
+                        Waybill number matches physical document
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', color: '#1E293B', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={checklist.dateMatch} onChange={e => setChecklist(p => ({ ...p, dateMatch: e.target.checked }))} />
+                        Delivery date matches system timestamp
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', color: '#1E293B', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={checklist.notDuplicate} onChange={e => setChecklist(p => ({ ...p, notDuplicate: e.target.checked }))} />
+                        Document confirmed not a duplicate scan
+                      </label>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Button title="Mark Missing POD" variant="secondary" onClick={handleMarkMissing} />
+                      <Button title="Confirm & Validate" variant="primary" onClick={handleValidate} disabled={!allChecked} />
                     </div>
                   </div>
                 )}
 
                 {activeTab === 'Reject' && (
                   <div style={{ background: '#FEF2F2', padding: '16px', borderRadius: '8px', border: '1px solid #FECACA' }}>
-                    <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: '#991B1B', margin: '0 0 4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <i className="ti ti-x" /> Document Rejected
-                    </h4>
-                    <p style={{ fontSize: '0.8rem', color: '#B91C1C', margin: '0 0 16px' }}>
-                      Flag this waybill's document as invalid or unacceptable.
-                    </p>
+                    <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: '#991B1B', margin: '0 0 12px' }}>Return Waybill for Correction</h4>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                       <div>
-                        <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#991B1B', display: 'block', marginBottom: '4px' }}>Reason for Rejection *</label>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#991B1B', display: 'block', marginBottom: '4px' }}>Rejection Category *</label>
                         <select value={rejectCategory} onChange={e => setRejectCategory(e.target.value)} style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #FCA5A5', background: '#fff', outline: 'none' }}>
-                          <option value="">Select Reason...</option>
-                          <option value="Illegible scan">Illegible scan</option>
-                          <option value="Mismatched waybill details">Mismatched waybill details</option>
-                          <option value="Unsigned by receiver">Unsigned by receiver</option>
+                          <option value="">Select Category...</option>
+                          <option value="Illegible Signature">Illegible Signature</option>
+                          <option value="Incorrect Date">Incorrect Date</option>
+                          <option value="Mismatched Consignee">Mismatched Consignee</option>
+                          <option value="Blurry Document Scan">Blurry Document Scan</option>
                           <option value="Other">Other</option>
                         </select>
                       </div>
                       <div>
-                        <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#991B1B', display: 'block', marginBottom: '4px' }}>Remarks</label>
-                        <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)} placeholder="Explain the issue..." rows={3} style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #FCA5A5', background: '#fff', outline: 'none', resize: 'vertical' }} />
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#991B1B', display: 'block', marginBottom: '4px' }}>Specific Correction Notes</label>
+                        <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)} placeholder="Provide instructions for operations..." rows={3} style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #FCA5A5', background: '#fff', outline: 'none', resize: 'vertical' }} />
                       </div>
-                      <button onClick={handleReject} disabled={!rejectCategory} style={{ background: '#DC2626', color: '#fff', border: 'none', padding: '10px', borderRadius: '6px', fontWeight: 600, width: '100%', cursor: rejectCategory ? 'pointer' : 'not-allowed', opacity: rejectCategory ? 1 : 0.6, marginTop: '8px' }}>
-                        Reject
-                      </button>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
+                        <Button title="Return to Ops" variant="danger" onClick={handleReject} disabled={!rejectCategory} />
+                      </div>
                     </div>
                   </div>
                 )}
@@ -342,10 +324,11 @@ const WaybillDetailCard: React.FC<{ waybill: Waybill, onUpdate: (id: string, upd
       {showImageModal && waybill.pod_image_url && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.75)', zIndex: 9999,
-          display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '24px'
+          background: 'rgba(15, 23, 42, 0.75)', backdropFilter: 'blur(4px)',
+          display: 'flex', justifyContent: 'center', alignItems: 'center',
+          zIndex: 999999, padding: '24px'
         }} onClick={() => setShowImageModal(false)}>
-          <div style={{ position: 'relative', maxWidth: '90%', maxHeight: '90%', backgroundColor: '#fff', borderRadius: '8px', padding: '8px' }} onClick={e => e.stopPropagation()}>
+          <div style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh' }} onClick={e => e.stopPropagation()}>
             <button onClick={() => setShowImageModal(false)} style={{
               position: 'absolute', top: '-16px', right: '-16px', background: '#EF4444', color: '#fff',
               border: 'none', borderRadius: '50%', width: '32px', height: '32px', cursor: 'pointer',
@@ -367,48 +350,102 @@ export const Waybills: React.FC = () => {
   const [searchParams] = useSearchParams();
   const waybillIdParam = searchParams.get('waybillId');
   const navigate = useNavigate();
-  const { waybills, updateWaybill, addWaybill, clients } = useAppData();
 
+  const {
+    data: initialData,
+    isLoading: loading,
+    refetch,
+  } = useQuery(
+    'waybills:list_and_clients',
+    async () => {
+      const [wbRes, cliRes] = await Promise.all([
+        waybillsService.list({ pageSize: 100 }),
+        clientsService.list({ pageSize: 100 }),
+      ]);
+      return {
+        waybills: wbRes.items || [],
+        clients: cliRes.items || [],
+      };
+    }
+  );
 
+  const [localWaybills, setLocalWaybills] = useState<Waybill[] | null>(null);
+  const waybills = localWaybills ?? initialData?.waybills ?? [];
+  const clients = initialData?.clients || [];
 
   const [isRecording, setIsRecording] = useState(false);
   const { toast } = useToast();
+  const {
+    modalState: dupModalState,
+    runPreCheck,
+    handleModalCancel,
+    handleModalRetry,
+    handleProceedWithRemarks,
+    handleProceedWithManualReview,
+  } = useDuplicatePreCheck();
+
   const [newWaybill, setNewWaybill] = useState({
     waybillNumber: '',
     deliveryDate: new Date().toISOString().split('T')[0],
-    clientCode: clients[0]?.id || '',
+    clientCode: '',
     deliveryStatus: 'Completed',
     podFile: null as any
   });
 
-  const handleRecordSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const newId = `WB-${Date.now()}`;
-    addWaybill({
-      id: newId,
-      waybillNumber: newWaybill.waybillNumber,
-      clientCode: newWaybill.clientCode,
-      deliveryDate: newWaybill.deliveryDate,
-      status: newWaybill.deliveryStatus === 'Completed' ? 'For Checking' : 'Not Completed',
-      hasOriginalPOD: false,
-      hasApprovedCTC: false,
-      encodedBy: user?.employeeId || 'EMP-003',
-      encodedAt: new Date().toISOString(),
-    });
-
-    if (newWaybill.deliveryStatus === 'Completed') {
-      toast.success(`Waybill ${newWaybill.waybillNumber} successfully recorded for verification.`);
-    } else {
-      toast.info(`Waybill ${newWaybill.waybillNumber} recorded for support/tracking only.`);
+  const updateWaybill = async (id: string, updates: Partial<Waybill>) => {
+    try {
+      await waybillsService.update(id, updates);
+      setLocalWaybills(waybills.map((w: Waybill) => w.id === id ? { ...w, ...updates } : w));
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to update waybill');
     }
-
-    setNewWaybill({ waybillNumber: '', deliveryDate: new Date().toISOString().split('T')[0], clientCode: clients[0]?.id || '', deliveryStatus: 'Completed', podFile: null });
-    setIsRecording(false);
   };
+
+  const handleRecordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      if (canCheckDuplicateInForm(user?.role, 'waybill')) {
+        const check = await runPreCheck({
+          entityType: 'waybill',
+          fieldName: 'waybillNumber',
+          fieldValue: newWaybill.waybillNumber,
+        });
+        if (!check.canProceed) return;
+      }
+
+      const payload: Partial<Waybill> = {
+        waybillNumber: newWaybill.waybillNumber,
+        clientCode: newWaybill.clientCode || clients[0]?.id || '',
+        deliveryDate: newWaybill.deliveryDate,
+        status: newWaybill.deliveryStatus === 'Completed' ? 'Pending' : 'Missing',
+        hasOriginalPOD: false,
+        hasApprovedCTC: false,
+        encodedBy: user?.fullName || 'System',
+        encodedAt: new Date().toISOString(),
+      };
+      const created = await waybillsService.create(payload as any);
+      setLocalWaybills([created, ...waybills]);
+
+      if (newWaybill.deliveryStatus === 'Completed') {
+        toast.success(`Waybill ${newWaybill.waybillNumber} successfully recorded for verification.`);
+      } else {
+        toast.info(`Waybill ${newWaybill.waybillNumber} recorded for support/tracking only.`);
+      }
+
+      setNewWaybill({ waybillNumber: '', deliveryDate: new Date().toISOString().split('T')[0], clientCode: clients[0]?.id || '', deliveryStatus: 'Completed', podFile: null });
+      setIsRecording(false);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to record waybill');
+    }
+  };
+
+  if (loading) {
+    return <LoadingSpinner text="Loading waybills..." />;
+  }
 
   // --- View: Level 3 (Waybill Verification Document) ---
   if (waybillIdParam) {
-    const wb = waybills.find(w => w.id === waybillIdParam);
+    const wb = waybills.find((w: Waybill) => w.id === waybillIdParam);
     if (!wb) return <div>Waybill not found</div>;
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -419,10 +456,10 @@ export const Waybills: React.FC = () => {
 
   // --- View: Level 2 (Client Detail View) ---
   if (clientIdParam) {
-    const client = clients.find(c => c.id === clientIdParam);
+    const client = clients.find((c: Client) => c.id === clientIdParam);
     if (!client) return <div>Client not found</div>;
 
-    const clientWaybills = waybills.filter(wb => wb.clientCode === clientIdParam);
+    const clientWaybills = waybills.filter((wb: Waybill) => wb.clientCode === clientIdParam);
 
     const columns = [
       { key: 'waybillNumber', label: 'WAYBILL NO.', sortable: true },
@@ -437,7 +474,7 @@ export const Waybills: React.FC = () => {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
 
-        <ClientInfoCard client={{ ...client, region: 'NCR' }} />
+        <ClientInfoCard client={{ ...client, region: 'NCR' }} onBack={() => navigate('/waybills')} />
 
         <Card>
           <div style={{ padding: '24px' }}>
@@ -467,14 +504,14 @@ export const Waybills: React.FC = () => {
   }
 
   // --- View: Level 1 (List View) ---
-  const grouped = new Map<string, any[]>();
-  waybills.forEach(wb => {
+  const grouped = new Map<string, Waybill[]>();
+  waybills.forEach((wb: Waybill) => {
     if (!grouped.has(wb.clientCode)) grouped.set(wb.clientCode, []);
     grouped.get(wb.clientCode)!.push(wb);
   });
 
   const listData = Array.from(grouped.entries()).map(([clientId, recs]) => {
-    const client = clients.find(c => c.id === clientId);
+    const client = clients.find((c: Client) => c.id === clientId);
 
     let computedStatus = 'Completed';
     if (recs.some(r => r.status !== 'Validated' && r.status !== 'Validated (CTC)')) {
@@ -536,8 +573,8 @@ export const Waybills: React.FC = () => {
                 />
                 <div>
                   <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#475569', display: 'block', marginBottom: '6px' }}>Client *</label>
-                  <select required value={newWaybill.clientCode} onChange={e => setNewWaybill(p => ({ ...p, clientCode: e.target.value }))} style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #E2E8F0', background: '#F8FAFC', fontFamily: 'inherit', fontSize: '13.5px' }}>
-                    {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  <select required value={newWaybill.clientCode || (clients[0]?.id ?? '')} onChange={e => setNewWaybill(p => ({ ...p, clientCode: e.target.value }))} style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #E2E8F0', background: '#F8FAFC', fontFamily: 'inherit', fontSize: '13.5px' }}>
+                    {clients.map((c: Client) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </div>
                 <div>
@@ -582,6 +619,14 @@ export const Waybills: React.FC = () => {
           }]}
         />
       </TableContainer>
+
+      <DuplicatePreCheckModal
+        state={dupModalState}
+        onCancel={handleModalCancel}
+        onRetry={handleModalRetry}
+        onProceedWithRemarks={handleProceedWithRemarks}
+        onProceedWithManualReview={handleProceedWithManualReview}
+      />
     </div>
   );
 };

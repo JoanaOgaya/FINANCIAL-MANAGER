@@ -1,34 +1,50 @@
 import React, { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { ROLE_LABELS, AuditLog } from '../data/seed';
-import type { UserRole } from '../types/auth';
+import type { Role } from '../types/auth';
 import { Card } from '../components/Card';
-import { Button } from '../components/Buttons';
-import { StatusCard } from '../components/StatusCard';
-import { DeliveryPerformanceChart, OrderStatusChart, DonutWidget } from '../components/DashboardCharts';
-import { BarChart, Bar, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { DataTable } from '../components/DataTable';
-import { useAppData } from '../context/AppDataContext';
+import { KpiCard } from '../components/shared/KpiCard';
+import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
+import { useQuery } from '../hooks/useQuery';
 import { RecentActivity } from '../components/RecentActivity';
-import { TableContainer } from '../components/TableContainer';
 import { AccountantDashboard } from './AccountantDashboard';
 import { HeadAccountantDashboard } from './HeadAccountantDashboard';
 import { DashboardBanner, peso } from '../components/DashboardWidgets';
+import { DonutWidget } from '../components/DashboardCharts';
+import { DashboardAiAlerts } from '../components/ai/DashboardAiAlerts';
+import { invoicesService } from '../services/invoicesService';
+import { arService } from '../services/arService';
+import { paymentsService } from '../services/paymentsService';
+import { cashFlowService } from '../services/cashFlowService';
+import { liquidationsService } from '../services/liquidationsService';
+import { clientsService } from '../services/clientsService';
+import { auditLogsService } from '../services/auditLogsService';
+import { duplicatesService } from '../services/duplicates.service';
+import { formatCurrency, formatDate } from '../utils/format';
+import type { Invoice, ARRecord, Payment, CashFlowRecord, Liquidation, Client, AuditLog } from '../types/entities';
 
-// ── Role Dashboard Components ──────────────────────────────────────
-
-
-
+// ── Assistant Finance Dashboard ──────────────────────────────────────
 const AsstFinanceDashboard: React.FC = () => {
   const navigate = useNavigate();
-  const { arRecords, payments, auditLogs, liquidations, cashFlowRecords } = useAppData();
+  const { user: authUser } = useAuth();
+  const { data: arData } = useQuery('asst:ar', () => arService.records({ pageSize: 100 }));
+  const { data: paymentsData } = useQuery('asst:payments', () => paymentsService.list({ pageSize: 100 }));
+  const { data: auditData } = useQuery('asst:audit', () => auditLogsService.list({ pageSize: 20 }));
+  const { data: liqData } = useQuery('asst:liq', () => liquidationsService.list({ pageSize: 100 }));
+  const { data: cashData } = useQuery('asst:cash', () => cashFlowService.list({ pageSize: 100 }));
+
+  const arRecords: ARRecord[] = arData?.items || [];
+  const payments: Payment[] = paymentsData?.items || [];
+  const auditLogs: AuditLog[] = auditData?.items || [];
+  const liquidations: Liquidation[] = liqData?.items || [];
+  const cashFlowRecords: CashFlowRecord[] = cashData?.items || [];
   
   const [liqViewMode, setLiqViewMode] = useState<'weekly' | 'monthly'>('weekly');
   const [showValidated, setShowValidated] = useState(true);
   const [showPending, setShowPending] = useState(true);
-  const totalAR = arRecords.reduce((s: any, r: any) => s + r.outstandingBalance, 0);
-  const nearDue = arRecords.filter(r => {
+
+  const totalAR = arRecords.reduce((s: number, r: ARRecord) => s + r.outstandingBalance, 0);
+  const nearDue = arRecords.filter((r: ARRecord) => {
     if (r.outstandingBalance <= 0 || r.status === 'Overdue' || r.status === 'Outstanding') return false;
     const dueDate = r.dueDate;
     if (!dueDate) return false;
@@ -36,48 +52,28 @@ const AsstFinanceDashboard: React.FC = () => {
     return daysRemaining >= 0 && daysRemaining <= 7;
   }).length;
 
-  const recentPayments = payments.filter(p => p.status === 'Validated' || p.status === 'Pending Validation').length;
-  const recentActivity = auditLogs.filter(l => l.userRole === 'Assistant of Finance Manager').slice(0, 5);
+  const recentActivity = auditLogs
+    .filter((l: AuditLog) => l.userRole === 'Assistant of Finance Manager' || l.userRole === 'ASSISTANT_FM')
+    .slice(0, 5);
 
-  // Generate Data for the last 7 days
   const last7Days = Array.from({ length: 7 }).map((_, i) => {
     const d = new Date();
     d.setDate(d.getDate() - (6 - i));
     return d;
   });
 
-  const paymentTrendData = last7Days.map(date => {
-    const dayStr = date.toLocaleString('default', { weekday: 'short' });
-    const dayPayments = payments.filter(p => {
-      const pDate = new Date(p.recordedAt || Date.now()); // fallback to now
-      return pDate.toDateString() === date.toDateString();
-    });
-
-    // Add some realistic dummy data if it's empty so the chart always looks good
-    const baseVal = Math.floor(Math.random() * 5) + 2;
-
-    return {
-      day: dayStr,
-      validated: dayPayments.filter(p => p.status === 'Validated').length || (baseVal * 2),
-      pending: dayPayments.filter(p => p.status === 'Pending Validation').length || baseVal,
-      rejected: dayPayments.filter(p => p.status === 'Rejected').length || Math.floor(baseVal / 2)
-    };
-  });
-
   const liquidationTrendWeekly = last7Days.map(date => {
     const dayStr = date.toLocaleString('default', { weekday: 'short' });
-    const dayLiquidations = liquidations?.filter((l: any) => {
+    const dayLiquidations = liquidations.filter((l: Liquidation) => {
       const lDate = new Date(l.submittedAt || Date.now());
       return lDate.toDateString() === date.toDateString();
-    }) || [];
-
-    const baseVal = Math.floor(Math.random() * 4) + 1;
+    });
 
     return {
       day: dayStr,
-      validated: dayLiquidations.filter((l: any) => l.status === 'Validated').length || baseVal,
-      pending: dayLiquidations.filter((l: any) => l.status === 'Pending Validation').length || (baseVal + 1),
-      returned: dayLiquidations.filter((l: any) => l.status === 'Returned').length || 0
+      validated: dayLiquidations.filter((l: Liquidation) => l.status === 'Validated').length,
+      pending: dayLiquidations.filter((l: Liquidation) => l.status === 'Pending Validation').length,
+      returned: dayLiquidations.filter((l: Liquidation) => l.status === 'Returned').length,
     };
   });
 
@@ -89,30 +85,26 @@ const AsstFinanceDashboard: React.FC = () => {
 
   const liquidationTrendMonthly = last6Months.map(date => {
     const monthStr = date.toLocaleString('default', { month: 'short' });
-    const monthLiquidations = liquidations?.filter((l: any) => {
+    const monthLiquidations = liquidations.filter((l: Liquidation) => {
       const lDate = new Date(l.submittedAt || Date.now());
       return lDate.getMonth() === date.getMonth() && lDate.getFullYear() === date.getFullYear();
-    }) || [];
-
-    const baseVal = Math.floor(Math.random() * 20) + 10;
+    });
 
     return {
       day: monthStr,
-      validated: monthLiquidations.filter((l: any) => l.status === 'Validated').length || baseVal,
-      pending: monthLiquidations.filter((l: any) => l.status === 'Pending Validation').length || (baseVal + 5),
-      returned: monthLiquidations.filter((l: any) => l.status === 'Returned').length || 0
+      validated: monthLiquidations.filter((l: Liquidation) => l.status === 'Validated').length,
+      pending: monthLiquidations.filter((l: Liquidation) => l.status === 'Pending Validation').length,
+      returned: monthLiquidations.filter((l: Liquidation) => l.status === 'Returned').length,
     };
   });
 
   const liquidationTrendData = liqViewMode === 'weekly' ? liquidationTrendWeekly : liquidationTrendMonthly;
 
-  // Executive Cash Flow Metrics (All Time or Current, here we use All-Time or filtered)
-  const totalCashInflow = cashFlowRecords?.filter((r: any) => r.type === 'Inflow').reduce((s: number, r: any) => s + r.amount, 0) || 0;
-  const totalCashOutflow = cashFlowRecords?.filter((r: any) => r.type === 'Outflow').reduce((s: number, r: any) => s + r.amount, 0) || 0;
+  const totalCashInflow = cashFlowRecords.filter((r: CashFlowRecord) => r.type === 'Inflow').reduce((s: number, r: CashFlowRecord) => s + r.amount, 0);
+  const totalCashOutflow = cashFlowRecords.filter((r: CashFlowRecord) => r.type === 'Outflow').reduce((s: number, r: CashFlowRecord) => s + r.amount, 0);
   const totalNetCash = totalCashInflow - totalCashOutflow;
-  const pendingLiquidationCount = liquidations?.filter((l: any) => l.status === 'Pending Validation' || l.status === 'Pending Approval').length || 0;
+  const pendingLiquidationCount = liquidations.filter((l: Liquidation) => l.status === 'Pending Validation').length;
 
-  const { user: authUser } = useAuth();
   const bannerName = (authUser?.fullName || 'Assistant').split(' ')[0];
 
   return (
@@ -127,19 +119,33 @@ const AsstFinanceDashboard: React.FC = () => {
         secondaryCta={{ label: 'SpeedPay Validation', onClick: () => navigate('/speedpay-validation') }}
       />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
-        <StatusCard label="Total Cash Inflows" value={`₱${totalCashInflow.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`} icon="ti-arrow-down-right" variant="success" periodText="Overall Inflows" />
-        <StatusCard label="Total Cash Outflows" value={`₱${totalCashOutflow.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`} icon="ti-arrow-up-right" variant="danger" periodText="Overall Outflows" />
-        <StatusCard label="Net Cash Balance" value={`₱${totalNetCash.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`} icon="ti-wallet" variant={totalNetCash >= 0 ? "new" : "danger"} periodText="Current Balance" />
-        <StatusCard label="Pending Liquidations" value={pendingLiquidationCount} icon="ti-file-search" variant="warning" periodText="Awaiting Review/Approval" />
+        <KpiCard label="Total Cash Inflows" value={formatCurrency(totalCashInflow)} icon="ti-arrow-down-right" variant="success" periodText="Overall Inflows" />
+        <KpiCard label="Total Cash Outflows" value={formatCurrency(totalCashOutflow)} icon="ti-arrow-up-right" variant="danger" periodText="Overall Outflows" />
+        <KpiCard label="Net Cash Balance" value={formatCurrency(totalNetCash)} icon="ti-wallet" variant={totalNetCash >= 0 ? "new" : "danger"} periodText="Current Balance" />
+        <KpiCard label="Pending Liquidations" value={pendingLiquidationCount} icon="ti-file-search" variant="warning" periodText="Awaiting Review/Approval" />
       </div>
       
-      {/* Secondary Metrics removed per request */}
+      <div style={{ background: '#FFF', borderRadius: '12px', border: '1px solid #E2E8F0', padding: '0' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid #E2E8F0' }}>
+          <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#0F172A' }}>Needs your attention</h3>
+          <span style={{ fontSize: '13px', color: '#94A3B8' }}>{pendingLiquidationCount} items</span>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+              <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#EF4444', marginTop: '6px' }} />
+              <div>
+                <div style={{ fontSize: '13.5px', fontWeight: 600, color: '#0F172A', marginBottom: '2px' }}>{pendingLiquidationCount} liquidation reports pending validation</div>
+                <div style={{ fontSize: '12.5px', color: '#94A3B8' }}>Expense disbursements and receipts awaiting review</div>
+              </div>
+            </div>
+            <button onClick={() => navigate('/liquidations')} style={{ background: 'none', border: 'none', color: '#0D9488', fontSize: '13px', fontWeight: 600, cursor: 'pointer', padding: 0 }}>Review →</button>
+          </div>
+        </div>
+      </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 20 }}>
-
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-
-
-          {/* Liquidation Trends Graph */}
           <Card style={{ display: 'flex', flexDirection: 'column' }}>
             <div style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
@@ -212,15 +218,28 @@ const AsstFinanceDashboard: React.FC = () => {
   );
 };
 
+// ── Finance Manager Dashboard ────────────────────────────────────────
 const FinanceManagerDashboard: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedClientId = searchParams.get('client');
-  const setSelectedClientId = (id: string | null) => {
-    if (id) setSearchParams({ client: id });
-    else setSearchParams({});
-  };
-  const { invoices, arRecords, payments, clients, auditLogs, cashFlowRecords } = useAppData();
+
+  const { data: invoicesData } = useQuery('fm:invoices', () => invoicesService.list({ pageSize: 100 }));
+  const { data: arData } = useQuery('fm:ar', () => arService.records({ pageSize: 100 }));
+  const { data: paymentsData } = useQuery('fm:payments', () => paymentsService.list({ pageSize: 100 }));
+  const { data: clientsData } = useQuery('fm:clients', () => clientsService.list({ pageSize: 100 }));
+  const { data: auditData } = useQuery('fm:audit', () => auditLogsService.list({ pageSize: 20 }));
+  const { data: cashData } = useQuery('fm:cash', () => cashFlowService.list({ pageSize: 100 }));
+  const { data: flaggedData } = useQuery('fm:flagged', () => duplicatesService.flagged({ pageSize: 100 }));
+
+  const invoices: Invoice[] = invoicesData?.items || [];
+  const arRecords: ARRecord[] = arData?.items || [];
+  const payments: Payment[] = paymentsData?.items || [];
+  const clients: Client[] = clientsData?.items || [];
+  const auditLogs: AuditLog[] = auditData?.items || [];
+  const cashFlowRecords: CashFlowRecord[] = cashData?.items || [];
+  const flaggedItems = flaggedData?.items || [];
+
   const [collectionTrendView, setCollectionTrendView] = useState<'weekly' | 'monthly'>('monthly');
   const [showInflow, setShowInflow] = useState(true);
   const [showOutflow, setShowOutflow] = useState(true);
@@ -229,24 +248,17 @@ const FinanceManagerDashboard: React.FC = () => {
   const filteredAR = selectedClientId ? arRecords.filter(r => r.clientId === selectedClientId) : arRecords;
   const filteredPayments = selectedClientId ? payments.filter(p => p.clientId === selectedClientId) : payments;
 
-  const totalBilled = filteredInvoices.reduce((s: any, i: any) => s + i.totalAmount, 0);
-  const totalCollected = filteredInvoices.filter(i => i.status === 'Paid').reduce((s, i) => s + i.totalAmount, 0);
-  const totalAR = arRecords.reduce((s, r) => s + r.outstandingBalance, 0);
+  const totalBilled = filteredInvoices.reduce((s: number, i: Invoice) => s + i.totalAmount, 0);
+  const totalCollected = filteredInvoices.filter(i => i.status === 'Paid').reduce((s: number, i: Invoice) => s + i.totalAmount, 0);
+  const totalAR = arRecords.reduce((s: number, r: ARRecord) => s + r.outstandingBalance, 0);
   const collectionRate = totalBilled > 0 ? ((totalCollected / totalBilled) * 100).toFixed(1) : '0.0';
 
-  // Cash Inflow this month
   const currentMonth = new Date().getMonth();
   const currentYear = new Date().getFullYear();
   const cashInflow = filteredPayments.filter(p => {
     const d = new Date(p.recordedAt);
     return d.getMonth() === currentMonth && d.getFullYear() === currentYear && p.status === 'Validated';
-  }).reduce((s, p) => s + p.amount, 0);
-
-
-
-  const pendingPayments = filteredPayments.filter(p => p.status === 'Pending Validation').length;
-  const validatedPayments = filteredPayments.filter(p => p.status === 'Validated').length;
-  const rejectedPayments = filteredPayments.filter(p => p.status === 'Rejected').length;
+  }).reduce((s: number, p: Payment) => s + p.amount, 0);
 
   // AR Aging Donut Data
   const agingData = [
@@ -258,7 +270,7 @@ const FinanceManagerDashboard: React.FC = () => {
   ].filter(d => d.value > 0);
 
   // Dynamic Cash Flow Trend Data
-  const monthlyDataMap: Record<string, { inflow: number, outflow: number }> = {
+  const monthlyDataMap: Record<string, { inflow: number; outflow: number }> = {
     'Jan': { inflow: 0, outflow: 0 },
     'Feb': { inflow: 0, outflow: 0 },
     'Mar': { inflow: 0, outflow: 0 },
@@ -273,7 +285,7 @@ const FinanceManagerDashboard: React.FC = () => {
     'Dec': { inflow: 0, outflow: 0 },
   };
 
-  cashFlowRecords?.forEach(record => {
+  cashFlowRecords.forEach(record => {
     const d = new Date(record.date);
     if (d.getFullYear() === currentYear) {
       const monthStr = d.toLocaleString('default', { month: 'short' });
@@ -287,18 +299,14 @@ const FinanceManagerDashboard: React.FC = () => {
     }
   });
 
-  let cashflowTrendMonthly = Object.keys(monthlyDataMap).map(key => ({
+  const cashflowTrendMonthly = Object.keys(monthlyDataMap).map(key => ({
     period: key,
     inflow: monthlyDataMap[key].inflow,
-    outflow: monthlyDataMap[key].outflow
-  })).filter(item => item.inflow > 0 || item.outflow > 0);
+    outflow: monthlyDataMap[key].outflow,
+  }));
 
-  if (cashflowTrendMonthly.length === 0) {
-    cashflowTrendMonthly = [{ period: 'Jan', inflow: 0, outflow: 0 }];
-  }
-
-  const weeklyDataMap: Record<string, { inflow: number, outflow: number }> = {};
-  cashFlowRecords?.forEach(record => {
+  const weeklyDataMap: Record<string, { inflow: number; outflow: number }> = {};
+  cashFlowRecords.forEach(record => {
     const d = new Date(record.date);
     if (d.getFullYear() === currentYear && d.getMonth() === currentMonth) {
       const week = Math.ceil(d.getDate() / 7);
@@ -317,20 +325,13 @@ const FinanceManagerDashboard: React.FC = () => {
   const cashflowTrendWeekly = Object.keys(weeklyDataMap).map(key => ({
     period: key,
     inflow: weeklyDataMap[key].inflow,
-    outflow: weeklyDataMap[key].outflow
+    outflow: weeklyDataMap[key].outflow,
   }));
 
   const trendData = collectionTrendView === 'monthly' ? cashflowTrendMonthly : (cashflowTrendWeekly.length > 0 ? cashflowTrendWeekly : [{ period: 'W1', inflow: 0, outflow: 0 }]);
 
-  // Ranking Computations
-  const topOverdueAccounts = [...arRecords]
-    .filter(r => r.outstandingBalance > 0 && (r.status === 'Overdue' || r.status === 'Outstanding'))
-    .sort((a, b) => b.outstandingBalance - a.outstandingBalance)
-    .slice(0, 5)
-    .map(r => ({ ...r, clientName: clients.find((c: any) => c.id === r.clientId)?.name || 'Unknown' }));
-
   const topPayingClients = [...clients]
-    .map((c: any) => {
+    .map(c => {
       const collected = payments.filter(p => p.clientId === c.id && p.status === 'Validated').reduce((sum, p) => sum + p.amount, 0);
       return { id: c.id, name: c.name, collected };
     })
@@ -338,9 +339,7 @@ const FinanceManagerDashboard: React.FC = () => {
     .sort((a, b) => b.collected - a.collected)
     .slice(0, 5);
 
-  // Accounts Near Due Date Table Data
-
-  let rawNearDueAccounts = invoices
+  const rawNearDueAccounts = invoices
     .filter(inv => inv.status !== 'Paid' && inv.status !== 'Sent' && inv.status !== 'Overdue')
     .map(inv => {
       const client = clients.find(c => c.id === inv.clientId);
@@ -349,92 +348,20 @@ const FinanceManagerDashboard: React.FC = () => {
       return {
         id: inv.id,
         clientId: inv.clientId,
-        clientName: client?.name || 'Unknown',
+        clientName: client?.name || inv.clientId,
         invoiceNumber: inv.invoiceNumber,
         amountDue: inv.totalAmount,
         dueDate: inv.dueDate,
-        daysRemaining
+        daysRemaining,
       };
     })
     .filter(r => r.daysRemaining >= 0 && r.daysRemaining <= 7);
 
-  // Add dummy data for demonstration if empty
-  if (rawNearDueAccounts.length === 0) {
-    rawNearDueAccounts = [
-      {
-        id: 'DEMO-1',
-        clientId: 'CL-001',
-        clientName: 'Lazada Philippines',
-        invoiceNumber: 'LZD-2026-9998',
-        amountDue: 45000.50,
-        dueDate: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
-        daysRemaining: 2
-      },
-      {
-        id: 'DEMO-2',
-        clientId: 'CL-002',
-        clientName: 'Shopee Express',
-        invoiceNumber: 'SHP-2026-9999',
-        amountDue: 28500.00,
-        dueDate: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
-        daysRemaining: 5
-      }
-    ];
-  }
-
   const nearDueCount = rawNearDueAccounts.length;
 
-  let nearDueAccounts: any[] = [];
-  if (selectedClientId) {
-    nearDueAccounts = rawNearDueAccounts
-      .filter(r => r.clientId === selectedClientId)
-      .sort((a, b) => a.daysRemaining - b.daysRemaining);
-  } else {
-    const grouped = new Map<string, any[]>();
-    rawNearDueAccounts.forEach(r => {
-      if (!grouped.has(r.clientId)) grouped.set(r.clientId, []);
-      grouped.get(r.clientId)!.push(r);
-    });
-    nearDueAccounts = Array.from(grouped.entries()).map(([clientId, recs]) => {
-      const minDays = Math.min(...recs.map(r => r.daysRemaining));
-      const minRow = recs.find(r => r.daysRemaining === minDays);
-      return {
-        id: clientId,
-        clientId,
-        clientName: minRow?.clientName,
-        invoiceNumber: '[Multiple]',
-        amountDue: recs.reduce((sum, r) => sum + r.amountDue, 0),
-        dueDate: minRow?.dueDate,
-        daysRemaining: minDays,
-        isGrouped: true
-      };
-    }).sort((a, b) => a.daysRemaining - b.daysRemaining);
-  }
-
-  const tableColumns = [
-    {
-      key: 'clientName', label: 'CLIENT', sortable: true, render: (row: any) => (
-        <span onClick={() => navigate(`/accounts-receivable/${row.clientId}`)} style={{ color: '#0F172A', fontWeight: 700, cursor: 'pointer', textDecoration: 'none' }}>
-          {row.clientName}
-        </span>
-      )
-    },
-    { key: 'invoiceNumber', label: 'INVOICE NO.' },
-    { key: 'amountDue', label: 'AMOUNT DUE', render: (row: any) => `₱${row.amountDue.toLocaleString('en-PH', { minimumFractionDigits: 2 })}` },
-    { key: 'dueDate', label: 'DUE DATE', render: (row: any) => new Date(row.dueDate).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }) },
-    {
-      key: 'daysRemaining', label: 'STATUS', render: (row: any) => {
-        if (row.daysRemaining < 0) return <span style={{ color: '#EF4444', fontWeight: 700 }}>{Math.abs(row.daysRemaining)} days overdue</span>;
-        if (row.daysRemaining === 0) return <span style={{ color: '#F59E0B', fontWeight: 700 }}>Due Today</span>;
-        return <span style={{ color: '#10B981', fontWeight: 700 }}>{row.daysRemaining} days left</span>;
-      }
-    },
-  ];
-
-  const displayColumns = selectedClientId
-    ? tableColumns
-    : tableColumns.filter(c => !['invoiceNumber'].includes(c.key as string));
-
+  const nearDueAccounts = selectedClientId
+    ? rawNearDueAccounts.filter(r => r.clientId === selectedClientId).sort((a, b) => a.daysRemaining - b.daysRemaining)
+    : rawNearDueAccounts.sort((a, b) => a.daysRemaining - b.daysRemaining);
 
   const { user: authUser } = useAuth();
   const bannerName = (authUser?.fullName || 'Manager').split(' ')[0];
@@ -450,50 +377,38 @@ const FinanceManagerDashboard: React.FC = () => {
         cta={{ label: 'View Reports', icon: 'ti-chart-bar', onClick: () => navigate('/reports') }}
         secondaryCta={{ label: 'For Review', onClick: () => navigate('/for-review') }}
       />
-      {/* KPI Cards */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
-          <StatusCard label="Total Invoices Billed" value={filteredInvoices.length} icon="ti-file-invoice" variant="new" periodText={`Total: ₱${totalBilled.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`} />
-          <StatusCard label="Total AR Outstanding" value={`₱${totalAR.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`} icon="ti-report-money" variant="warning" />
-          <StatusCard label="Collection Rate" value={`${collectionRate}%`} icon="ti-chart-pie" variant="info" periodText="vs. total invoiced" />
-          <StatusCard label="Cash Inflow (This Month)" value={`₱${cashInflow.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`} icon="ti-cash" variant="success" />
+          <KpiCard label="Total Invoices Billed" value={filteredInvoices.length} icon="ti-file-invoice" variant="new" periodText={`Total: ${formatCurrency(totalBilled)}`} />
+          <KpiCard label="Total AR Outstanding" value={formatCurrency(totalAR)} icon="ti-report-money" variant="warning" />
+          <KpiCard label="Collection Rate" value={`${collectionRate}%`} icon="ti-chart-pie" variant="info" periodText="vs. total invoiced" />
+          <KpiCard label="Cash Inflow (This Month)" value={formatCurrency(cashInflow)} icon="ti-cash" variant="success" />
         </div>
 
         {/* Needs your attention panel */}
         <div style={{ background: '#FFF', borderRadius: '12px', border: '1px solid #E2E8F0', padding: '0' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid #E2E8F0' }}>
             <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#0F172A' }}>Needs your attention</h3>
-            <span style={{ fontSize: '13px', color: '#94A3B8' }}>3 items</span>
+            <span style={{ fontSize: '13px', color: '#94A3B8' }}>{flaggedItems.length + nearDueCount} items</span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid #E2E8F0' }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
                 <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#EF4444', marginTop: '6px' }} />
                 <div>
-                  <div style={{ fontSize: '13.5px', fontWeight: 600, color: '#0F172A', marginBottom: '2px' }}>4 exact-match duplicate invoices</div>
-                  <div style={{ fontSize: '12.5px', color: '#94A3B8' }}>Out of 13 flagged, need confirmation</div>
+                  <div style={{ fontSize: '13.5px', fontWeight: 600, color: '#0F172A', marginBottom: '2px' }}>{flaggedItems.length} duplicate alerts</div>
+                  <div style={{ fontSize: '12.5px', color: '#94A3B8' }}>Invoices and payments flagged by detection service</div>
                 </div>
               </div>
               <button onClick={() => navigate('/flagged-duplicates')} style={{ background: 'none', border: 'none', color: '#0D9488', fontSize: '13px', fontWeight: 600, cursor: 'pointer', padding: 0 }}>Review →</button>
             </div>
-            
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid #E2E8F0' }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#D97706', marginTop: '6px' }} />
-                <div>
-                  <div style={{ fontSize: '13.5px', fontWeight: 600, color: '#0F172A', marginBottom: '2px' }}>6 items pending your review</div>
-                  <div style={{ fontSize: '12.5px', color: '#94A3B8' }}>Adjustments and payment confirmations</div>
-                </div>
-              </div>
-              <button onClick={() => navigate('/for-review')} style={{ background: 'none', border: 'none', color: '#0D9488', fontSize: '13px', fontWeight: 600, cursor: 'pointer', padding: 0 }}>Review →</button>
-            </div>
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px' }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#EF4444', marginTop: '6px' }} />
+                <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#D97706', marginTop: '6px' }} />
                 <div>
                   <div style={{ fontSize: '13.5px', fontWeight: 600, color: '#0F172A', marginBottom: '2px' }}>{nearDueCount} accounts near due date</div>
-                  <div style={{ fontSize: '12.5px', color: '#94A3B8' }}>{nearDueAccounts.slice(0, 2).map((a: any) => `${a.clientName} (${a.daysRemaining} days)`).join(', ')}</div>
+                  <div style={{ fontSize: '12.5px', color: '#94A3B8' }}>{nearDueAccounts.slice(0, 2).map(a => `${a.clientName} (${a.daysRemaining} days)`).join(', ') || 'None within 7 days'}</div>
                 </div>
               </div>
               <button onClick={() => navigate('/accounts-receivable')} style={{ background: 'none', border: 'none', color: '#0D9488', fontSize: '13px', fontWeight: 600, cursor: 'pointer', padding: 0 }}>View →</button>
@@ -502,8 +417,6 @@ const FinanceManagerDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Charts Section */}
-      {/* Row 1: Cash Flow & Top Paying Clients */}
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 24, marginBottom: 24 }}>
         <Card style={{ display: 'flex', flexDirection: 'column' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
@@ -546,7 +459,7 @@ const FinanceManagerDashboard: React.FC = () => {
                   cursor={{ fill: 'transparent' }}
                   contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
                   labelStyle={{ fontWeight: 700, color: '#0F172A', marginBottom: '4px' }}
-                  formatter={(value: any, name: any) => [`₱${Number(value).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`, name === 'inflow' ? 'Cash Inflow' : 'Cash Outflow']}
+                  formatter={(value: any, name: any) => [formatCurrency(Number(value)), name === 'inflow' ? 'Cash Inflow' : 'Cash Outflow']}
                 />
                 <Area type="monotone" dataKey="inflow" hide={!showInflow} stroke="#10B981" strokeWidth={2} fillOpacity={1} fill="url(#colorInflow)" activeDot={{ r: 6, fill: '#10B981', stroke: '#fff', strokeWidth: 2 }} />
                 <Area type="monotone" dataKey="outflow" hide={!showOutflow} stroke="#0D9488" strokeWidth={2} fillOpacity={1} fill="url(#colorOutflow)" activeDot={{ r: 6, fill: '#0D9488', stroke: '#fff', strokeWidth: 2 }} />
@@ -581,7 +494,7 @@ const FinanceManagerDashboard: React.FC = () => {
                   <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#F1F5F9', color: '#64748B', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 700 }}>{i + 1}</div>
                   <span style={{ fontSize: '0.875rem', fontWeight: 500, color: '#0F172A' }}>{c.name}</span>
                 </div>
-                <span style={{ fontSize: '0.875rem', fontWeight: 700, color: '#10B981' }}>₱{c.collected.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                <span style={{ fontSize: '0.875rem', fontWeight: 700, color: '#10B981' }}>{formatCurrency(c.collected)}</span>
               </div>
             )) : (
               <div style={{ fontSize: '0.85rem', color: '#64748B', textAlign: 'center', padding: '20px 0' }}>No payment data yet.</div>
@@ -595,7 +508,6 @@ const FinanceManagerDashboard: React.FC = () => {
         </Card>
       </div>
 
-      {/* Row 2: AR Aging & Accounts Near Due Date */}
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 24, marginBottom: 24 }}>
         <DonutWidget
           title="AR Aging Distribution"
@@ -603,7 +515,7 @@ const FinanceManagerDashboard: React.FC = () => {
           icon="ti-calendar-time"
           data={agingData}
           centerLabel="TOTAL AR"
-          centerNumber={`₱${Math.floor(totalAR / 1000)}k`}
+          centerNumber={formatCurrency(totalAR)}
         />
         
         <Card style={{ display: 'flex', flexDirection: 'column' }}>
@@ -611,7 +523,7 @@ const FinanceManagerDashboard: React.FC = () => {
           <p style={{ margin: '0 0 16px 0', fontSize: '0.8125rem', color: '#64748B' }}>Within the next 7 days</p>
           
           <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 0 }}>
-            {nearDueAccounts.slice(0, 5).map((account: any, index: number, arr: any[]) => (
+            {nearDueAccounts.slice(0, 5).map((account, index, arr) => (
               <div key={account.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: index < arr.length - 1 ? '1px solid #F1F5F9' : 'none' }}>
                 <span style={{ fontSize: '0.875rem', color: '#0F172A', fontWeight: 500 }}>{account.clientName}</span>
                 {account.daysRemaining < 0 ? (
@@ -635,78 +547,43 @@ const FinanceManagerDashboard: React.FC = () => {
         </Card>
       </div>
 
-      {/* Row 3: Recent Activity & Duplicate Detection Distribution */}
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 24 }}>
         <RecentActivity
-          logs={auditLogs.filter(l => l.userRole === 'Finance Manager').length > 0
-            ? auditLogs.filter(l => l.userRole === 'Finance Manager').slice(0, 5)
+          logs={auditLogs.filter(l => l.userRole === 'Financial Manager' || l.userRole === 'FINANCIAL_MANAGER').length > 0
+            ? auditLogs.filter(l => l.userRole === 'Financial Manager' || l.userRole === 'FINANCIAL_MANAGER').slice(0, 5)
             : auditLogs.slice(0, 5)}
           onViewAll={() => navigate('/audit-logs')}
         />
         
-        {/* Duplicate Detection Distribution */}
         <Card style={{ display: 'flex', flexDirection: 'column' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
             <div>
-              <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: '#0F172A' }}>Duplicate Detection Distribution</h3>
-              <p style={{ margin: '4px 0 0', fontSize: '0.8125rem', color: '#64748B' }}>Classification breakdown of scanned invoices and receipts</p>
+              <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: '#0F172A' }}>Duplicate Detection Summary</h3>
+              <p style={{ margin: '4px 0 0', fontSize: '0.8125rem', color: '#64748B' }}>Flagged potential duplicate records</p>
             </div>
             <i className="ti-chart-pie" style={{ color: '#0EA5E9', fontSize: '18px' }}></i>
           </div>
 
-          <div style={{ width: '100%', height: 220, position: 'relative', marginTop: '20px' }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={[
-                    { name: 'Exact Duplicate Match', value: 4, color: '#EF4444' },
-                    { name: 'High Similarity Match', value: 9, color: '#F59E0B' },
-                    { name: 'Cleared Unique Records', value: 0, color: '#10B981' },
-                    { name: 'Pending Review', value: 6, color: '#0EA5E9' }
-                  ]}
-                  innerRadius={65}
-                  outerRadius={90}
-                  paddingAngle={5}
-                  dataKey="value"
-                  stroke="none"
-                >
-                  {[
-                    { name: 'Exact Duplicate Match', value: 4, color: '#EF4444' },
-                    { name: 'High Similarity Match', value: 9, color: '#F59E0B' },
-                    { name: 'Cleared Unique Records', value: 0, color: '#10B981' },
-                    { name: 'Pending Review', value: 6, color: '#0EA5E9' }
-                  ].map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip 
-                  formatter={(val: any) => [val, 'Alerts']}
-                  contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }} 
-                />
-              </PieChart>
-            </ResponsiveContainer>
-            {/* Center Label */}
-            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
-              <span style={{ fontSize: '24px', fontWeight: 800, color: '#0F172A', lineHeight: 1 }}>13</span>
-              <span style={{ fontSize: '10px', fontWeight: 700, color: '#64748B', letterSpacing: '1px', textTransform: 'uppercase', marginTop: '4px' }}>ALERTS</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '24px 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '13px', color: '#475569' }}>Total Flagged</span>
+              <span style={{ fontSize: '16px', fontWeight: 700, color: '#EF4444' }}>{flaggedItems.length}</span>
             </div>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: '12px', marginTop: '32px' }}>
-            {[
-              { label: 'Exact Duplicate Match', value: 4, color: '#EF4444' },
-              { label: 'High Similarity Match', value: 9, color: '#F59E0B' },
-              { label: 'Cleared Unique Records', value: 0, color: '#10B981' },
-              { label: 'Pending Review', value: 6, color: '#0EA5E9' }
-            ].map((item, idx) => (
-              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: item.color }} />
-                  <span style={{ fontSize: '13px', color: '#475569' }}>{item.label}</span>
-                </div>
-                <span style={{ fontSize: '14px', fontWeight: 700, color: '#0F172A' }}>{item.value}</span>
-              </div>
-            ))}
+            <button
+              onClick={() => navigate('/flagged-duplicates')}
+              style={{
+                marginTop: 12,
+                background: '#0D9488',
+                color: '#fff',
+                border: 'none',
+                padding: '10px 16px',
+                borderRadius: 8,
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+            >
+              Open Flagged Duplicates
+            </button>
           </div>
         </Card>
       </div>
@@ -715,13 +592,11 @@ const FinanceManagerDashboard: React.FC = () => {
 };
 
 // ── Main Dashboard ─────────────────────────────────────────────────
-const DASHBOARD_MAP: Record<UserRole, React.FC> = {
-  'Accountant': AccountantDashboard,
-  'Head Accountant': HeadAccountantDashboard,
-  'Assistant of Finance Manager': AsstFinanceDashboard,
-  'Assistant of Financial Manager': AsstFinanceDashboard,
-  'Finance Manager': FinanceManagerDashboard,
-  'Financial Manager': FinanceManagerDashboard,
+const DASHBOARD_MAP: Record<Role, React.FC> = {
+  ACCOUNTANT: AccountantDashboard,
+  HEAD_ACCOUNTANT: HeadAccountantDashboard,
+  ASSISTANT_FM: AsstFinanceDashboard,
+  FINANCIAL_MANAGER: FinanceManagerDashboard,
 };
 
 export const Dashboard: React.FC = () => {
@@ -738,8 +613,9 @@ export const Dashboard: React.FC = () => {
     );
   }
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <RoleDashboard />
+      <DashboardAiAlerts />
     </div>
   );
 };

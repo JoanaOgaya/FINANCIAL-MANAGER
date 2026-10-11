@@ -1,23 +1,38 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { DataTable } from '../components/DataTable';
-import { StatusBadge } from '../components/StatusBadge';
+import { StatusBadge } from '../components/shared/StatusBadge';
 import { Card } from '../components/Card';
 import { Button } from '../components/Buttons';
 import { CustomDatePicker } from '../components/CustomDatePicker';
-import { Waybill, Invoice, BillingRate } from '../data/seed';
 import { useToast } from '../components/ToastContext';
-import { useAppData } from '../context/AppDataContext';
+import { useQuery } from '../hooks/useQuery';
+import { waybillsService } from '../services/waybillsService';
+import { invoicesService } from '../services/invoicesService';
+import { clientsService } from '../services/clientsService';
+import { auditLogsService } from '../services/auditLogsService';
+import type { Waybill, Invoice, BillingRate, Client } from '../types/entities';
 import { TableContainer } from '../components/TableContainer';
 import { computeFreightCost } from '../utils/billing';
 import { useAuth } from '../context/AuthContext';
+import { formatCurrency, formatDate } from '../utils/format';
+import { useDuplicatePreCheck } from '../hooks/useDuplicatePreCheck';
+import { DuplicatePreCheckModal } from '../components/ai/DuplicatePreCheckModal';
+import { canCheckDuplicateInForm } from '../utils/roleAccess';
 
 type Step = 1 | 2 | 3;
 
 export const InvoiceCreation: React.FC = () => {
   const { user } = useAuth();
   const { toast } = useToast();
-  const { waybills, invoices, addInvoice, updateInvoice, updateWaybill, clients } = useAppData();
+
+  const { data: waybillsData, refetch: refetchWaybills } = useQuery('invcreate:waybills', () => waybillsService.list({ pageSize: 200 }));
+  const { data: invoicesData, refetch: refetchInvoices } = useQuery('invcreate:invoices', () => invoicesService.list({ pageSize: 200 }));
+  const { data: clientsData } = useQuery('invcreate:clients', () => clientsService.list({ pageSize: 100 }));
+
+  const waybills: Waybill[] = waybillsData?.items || [];
+  const invoices: Invoice[] = invoicesData?.items || [];
+  const clients: Client[] = clientsData?.items || [];
 
   const [searchParams] = useSearchParams();
   const editInvoiceId = searchParams.get('edit');
@@ -28,6 +43,15 @@ export const InvoiceCreation: React.FC = () => {
   const [selectedWaybills, setSelectedWaybills] = useState<string[]>([]);
   const [billingPeriod, setBillingPeriod] = useState('');
   
+  const {
+    modalState: dupModalState,
+    runPreCheck,
+    handleModalCancel,
+    handleModalRetry,
+    handleProceedWithRemarks,
+    handleProceedWithManualReview,
+  } = useDuplicatePreCheck();
+
   // To handle the details view on click
   const [selectedWaybillForDetails, setSelectedWaybillForDetails] = useState<string | null>(null);
 
@@ -73,7 +97,7 @@ export const InvoiceCreation: React.FC = () => {
   // Pre-load logic for Edit
   useEffect(() => {
     if (editInvoiceId) {
-      const invoice = invoices.find(i => i.id === editInvoiceId || i.invoiceNumber === editInvoiceId);
+      const invoice = invoices.find((i: Invoice) => i.id === editInvoiceId || i.invoiceNumber === editInvoiceId);
       if (invoice && invoice.status === 'Draft') {
         if (invoice.clientId) setSelectedClientId(invoice.clientId);
         setSelectedWaybills(invoice.waybillIds || []);
@@ -87,18 +111,18 @@ export const InvoiceCreation: React.FC = () => {
   }, [editInvoiceId, invoices]);
 
   // Step 1: Client Selection
-  const availableWaybills = waybills.filter(w => {
+  const availableWaybills = waybills.filter((w: Waybill) => {
     const isUnbilled = !w.invoiceId || w.invoiceId === editInvoiceId;
     return isUnbilled && (w.status === 'Validated' || w.status === 'Validated (CTC)');
   });
 
   const clientsWithPending = useMemo(() => {
     const counts = new Map<string, number>();
-    availableWaybills.forEach(w => {
+    availableWaybills.forEach((w: Waybill) => {
       counts.set(w.clientCode, (counts.get(w.clientCode) || 0) + 1);
     });
     return Array.from(counts.entries()).map(([clientId, count]) => {
-      const client = clients.find(c => c.id === clientId);
+      const client = clients.find((c: Client) => c.id === clientId);
       return {
         id: clientId,
         clientName: client?.name || clientId,
@@ -116,7 +140,7 @@ export const InvoiceCreation: React.FC = () => {
 
   // Step 2: Waybills for Client
   const clientWaybills = useMemo(() => {
-    return availableWaybills.filter(w => w.clientCode === selectedClientId).map(wb => {
+    return availableWaybills.filter((w: Waybill) => w.clientCode === selectedClientId).map((wb: Waybill) => {
       let breakdown: any = null;
       try {
         breakdown = computeFreightCost(wb, overrideRates);
@@ -135,10 +159,10 @@ export const InvoiceCreation: React.FC = () => {
 
   const filteredWaybills = useMemo(() => {
     if (!searchQuery) return clientWaybills;
-    return clientWaybills.filter(w => w.waybillNumber.toLowerCase().includes(searchQuery.toLowerCase()));
+    return clientWaybills.filter((w: any) => w.waybillNumber.toLowerCase().includes(searchQuery.toLowerCase()));
   }, [clientWaybills, searchQuery]);
 
-  const invoiceClient = clients.find(c => c.id === selectedClientId);
+  const invoiceClient = clients.find((c: Client) => c.id === selectedClientId);
   const derivedBillingSchedule = invoiceClient?.billingSchedule ?? 'Monthly';
 
   // Derived periods for Step 2
@@ -180,7 +204,7 @@ export const InvoiceCreation: React.FC = () => {
     if (selectedWaybills.length > 0) {
       const uniquePeriods = new Map<string, { label: string, start: Date, end: Date }>();
       selectedWaybills.forEach(id => {
-        const wb = waybills.find(w => w.id === id);
+        const wb = waybills.find((w: Waybill) => w.id === id);
         if (wb && wb.deliveryDate) {
           const p = generatePeriodForDate(wb.deliveryDate, derivedBillingSchedule);
           uniquePeriods.set(p.label, p);
@@ -221,7 +245,7 @@ export const InvoiceCreation: React.FC = () => {
 
     if (selectedPeriodInfo) {
       selectedWaybills.forEach(wbId => {
-        const wb = waybills.find(w => w.id === wbId);
+        const wb = waybills.find((w: Waybill) => w.id === wbId);
         if (!wb) return;
         const p = generatePeriodForDate(wb.deliveryDate, derivedBillingSchedule);
         if (p.label !== selectedPeriodInfo.label) return;
@@ -262,7 +286,7 @@ export const InvoiceCreation: React.FC = () => {
   };
 
   const calc = computeInvoice();
-  const selectedWbDetail = clientWaybills.find(w => w.id === selectedWaybillForDetails);
+  const selectedWbDetail = clientWaybills.find((w: any) => w.id === selectedWaybillForDetails);
 
   if (submitted) {
     return (
@@ -372,9 +396,9 @@ export const InvoiceCreation: React.FC = () => {
                     setSelectedClientId(row.id);
                     setStep(2);
                     
-                    const clientWBs = availableWaybills.filter(w => w.clientCode === row.id);
-                    const validWBs = clientWBs.filter(w => w.status === 'Validated');
-                    setSelectedWaybills(validWBs.map(w => w.id));
+                    const clientWBs = availableWaybills.filter((w: Waybill) => w.clientCode === row.id);
+                    const validWBs = clientWBs.filter((w: Waybill) => w.status === 'Validated');
+                    setSelectedWaybills(validWBs.map((w: Waybill) => w.id));
                     
                     setSelectedWaybillForDetails(null);
                     setSearchQuery('');
@@ -386,7 +410,7 @@ export const InvoiceCreation: React.FC = () => {
         </div>
       )}
 
-      {/* Step 2: Custom Layout matching mockups precisely */}
+      {/* Step 2: Custom Layout matching wireframe design precisely */}
       {step === 2 && (
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
           
@@ -588,7 +612,7 @@ export const InvoiceCreation: React.FC = () => {
                 </thead>
                 <tbody>
                   {calc.validIds.map((id) => {
-                    const detail = clientWaybills.find(w => w.id === id);
+                    const detail = clientWaybills.find((w: any) => w.id === id);
                     if (!detail || !detail.breakdown) return null;
                     const bd = detail.breakdown;
                     return (
@@ -637,11 +661,11 @@ export const InvoiceCreation: React.FC = () => {
                   <Button title="Back" variant="secondary" onClick={() => setStep(2)} />
                   <button
                     disabled={isBillingPeriodInvalid || isDateInvalid}
-                    onClick={() => {
+                    onClick={async () => {
                       if (editInvoiceId) {
-                        const existing = invoices.find(i => i.id === editInvoiceId || i.invoiceNumber === editInvoiceId);
+                        const existing = invoices.find((i: Invoice) => i.id === editInvoiceId || i.invoiceNumber === editInvoiceId);
                         if (existing) {
-                          updateInvoice(existing.id, {
+                          await invoicesService.update(existing.id, {
                             waybillIds: calc.validIds,
                             amount: calc.base,
                             vatAmount: calc.vat,
@@ -655,16 +679,25 @@ export const InvoiceCreation: React.FC = () => {
                             notes,
                             appliedRates: overrideRates,
                           });
-                          calc.validIds.forEach(id => updateWaybill(id, { status: 'Billed' }));
+                          await Promise.all(calc.validIds.map(id => waybillsService.update(id, { status: 'Billed' })));
+                          refetchInvoices();
+                          refetchWaybills();
                           setSubmitted(true);
                           return;
                         }
                       }
 
-                      const newInvoiceId = `INV-${Date.now()}`;
                       const invNum = `INV-${new Date().getFullYear()}-${String(invoices.length + 1).padStart(3, '0')}`;
-                      addInvoice({
-                        id: newInvoiceId,
+                      if (canCheckDuplicateInForm(user?.role, 'invoice')) {
+                        const check = await runPreCheck({
+                          entityType: 'invoice',
+                          fieldName: 'invoiceNumber',
+                          fieldValue: invNum,
+                        });
+                        if (!check.canProceed) return;
+                      }
+
+                      await invoicesService.create({
                         invoiceNumber: invNum,
                         clientId: invoiceClient?.id ?? '',
                         waybillIds: calc.validIds,
@@ -675,13 +708,15 @@ export const InvoiceCreation: React.FC = () => {
                         billingSchedule: derivedBillingSchedule,
                         billingPeriod,
                         status: 'Pending Approval',
-                        createdBy: user?.employeeId || 'EMP-003',
+                        createdBy: user?.fullName || 'User',
                         createdAt: new Date(issueDate).toISOString(),
                         dueDate: new Date(dueDate).toISOString(),
                         notes,
                         appliedRates: overrideRates,
                       });
-                      calc.validIds.forEach(id => updateWaybill(id, { status: 'Billed' }));
+                      await Promise.all(calc.validIds.map(id => waybillsService.update(id, { status: 'Billed' })));
+                      refetchInvoices();
+                      refetchWaybills();
                       setSubmitted(true);
                       toast.success(`Invoice ${invNum} submitted for approval.`, 'Success');
                     }}
@@ -776,6 +811,14 @@ export const InvoiceCreation: React.FC = () => {
           </div>
         </div>
       )}
+      {/* Duplicate Pre-Check Modal */}
+      <DuplicatePreCheckModal
+        state={dupModalState}
+        onCancel={handleModalCancel}
+        onRetry={handleModalRetry}
+        onProceedWithRemarks={handleProceedWithRemarks}
+        onProceedWithManualReview={handleProceedWithManualReview}
+      />
 
     </div>
   );

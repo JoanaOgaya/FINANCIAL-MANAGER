@@ -1,16 +1,23 @@
 import React, { Component, ErrorInfo, useState } from 'react';
 import { useSearchParams, useNavigate, useParams } from 'react-router-dom';
-import { useAppData } from '../context/AppDataContext';
 import { TableContainer } from '../components/TableContainer';
-import { StatusCard } from '../components/StatusCard';
+import { KpiCard } from '../components/shared/KpiCard';
 import { DataTable } from '../components/DataTable';
 import { CustomDatePicker } from '../components/CustomDatePicker';
-import { StatusBadge } from '../components/StatusBadge';
+import { StatusBadge } from '../components/shared/StatusBadge';
 import { ClientInfoCard } from '../components/ClientInfoCard';
 import { Card } from '../components/Card';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend, LineChart, Line, ComposedChart } from 'recharts';
 import { useToast } from '../components/ToastContext';
 import { useAuth } from '../context/AuthContext';
+import { useQuery } from '../hooks/useQuery';
+import { invoicesService } from '../services/invoicesService';
+import { clientsService } from '../services/clientsService';
+import { arService } from '../services/arService';
+import { paymentsService } from '../services/paymentsService';
+import { auditLogsService } from '../services/auditLogsService';
+import { Role } from '../types/auth';
+import type { Invoice, Client, AccountsReceivableRecord, Payment, AuditLog } from '../types/entities';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -52,7 +59,20 @@ const ReportsContent: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { invoices, clients, arRecords, payments, addAuditLog } = useAppData();
+  
+  const { data: invData } = useQuery('reports:invoices', () => invoicesService.list({ pageSize: 100 }));
+  const { data: clientData } = useQuery('reports:clients', () => clientsService.list({ pageSize: 100 }));
+  const { data: arData } = useQuery('reports:ar', () => arService.records({ pageSize: 100 }));
+  const { data: pmtData } = useQuery('reports:payments', () => paymentsService.list({ pageSize: 100 }));
+
+  const invoices: Invoice[] = invData?.items || [];
+  const clients: Client[] = clientData?.items || [];
+  const arRecords: AccountsReceivableRecord[] = arData?.items || [];
+  const payments: Payment[] = pmtData?.items || [];
+
+  const addAuditLog = (data: Partial<AuditLog>) => {
+    auditLogsService.create(data).catch(() => {});
+  };
 
   const { id } = useParams();
   const selectedClientId = id;
@@ -67,8 +87,7 @@ const ReportsContent: React.FC = () => {
   const [clientSearch, setClientSearch] = useState('');
   const [isClientDropdownOpen, setIsClientDropdownOpen] = useState(false);
 
-  // Compile Parameters state
-  const defaultLedger = (user?.role === 'Accountant') ? 'Aging of Accounts' : 'Duplicate Alert Summary';
+  const defaultLedger = (user?.role === 'ACCOUNTANT') ? 'Aging of Accounts' : 'Duplicate Alert Summary';
   const [compileLedgerType, setCompileLedgerType] = useState(defaultLedger);
   const [compileSearch, setCompileSearch] = useState('');
   const [activeSearch, setActiveSearch] = useState('');
@@ -266,13 +285,13 @@ const ReportsContent: React.FC = () => {
 
   const getFilteredAR = () => {
     if (!isGenerated || !dateFrom || !dateTo) return arRecords;
-    return arRecords.filter(ar => {
+    return arRecords.filter((ar: AccountsReceivableRecord) => {
       const d = ar.invoiceDate.split('T')[0];
       const matchDate = d >= dateFrom && d <= dateTo;
       if (!matchDate) return false;
       if (activeSearch) {
         const term = activeSearch.toLowerCase();
-        const client = clients.find(c => c.id === ar.clientId);
+        const client = clients.find((c: Client) => c.id === ar.clientId);
         const cName = client?.name?.toLowerCase() || '';
         return cName.includes(term) || ar.invoiceId.toLowerCase().includes(term);
       }
@@ -282,13 +301,13 @@ const ReportsContent: React.FC = () => {
 
   const getFilteredInvoices = () => {
     if (!isGenerated || !dateFrom || !dateTo) return invoices;
-    return invoices.filter(inv => {
+    return invoices.filter((inv: Invoice) => {
       const d = inv.createdAt.split('T')[0];
       const matchDate = d >= dateFrom && d <= dateTo;
       if (!matchDate) return false;
       if (activeSearch) {
         const term = activeSearch.toLowerCase();
-        const client = clients.find(c => c.id === inv.clientId);
+        const client = clients.find((c: Client) => c.id === inv.clientId);
         const cName = client?.name?.toLowerCase() || '';
         return cName.includes(term) || inv.invoiceNumber.toLowerCase().includes(term);
       }
@@ -298,13 +317,13 @@ const ReportsContent: React.FC = () => {
 
   const getFilteredPayments = () => {
     if (!isGenerated || !dateFrom || !dateTo) return payments;
-    return payments.filter(p => {
+    return payments.filter((p: Payment) => {
       const d = p.recordedAt.split('T')[0];
       const matchDate = d >= dateFrom && d <= dateTo;
       if (!matchDate) return false;
       if (activeSearch) {
         const term = activeSearch.toLowerCase();
-        const client = clients.find(c => c.id === p.clientId);
+        const client = clients.find((c: Client) => c.id === p.clientId);
         const cName = client?.name?.toLowerCase() || '';
         return cName.includes(term) || p.invoiceNumber?.toLowerCase().includes(term) || p.id.toLowerCase().includes(term);
       }
@@ -312,14 +331,14 @@ const ReportsContent: React.FC = () => {
     });
   };
 
-  const filteredClientsForDropdown = Array.from(new Map(clients.map(c => [c.name, c])).values())
-    .filter(c => c.name.toLowerCase().includes(clientSearch.toLowerCase()));
+  const filteredClientsForDropdown = Array.from(new Map(clients.map((c: Client) => [c.name, c])).values())
+    .filter((c: Client) => c.name.toLowerCase().includes(clientSearch.toLowerCase()));
 
   let agingRecords: any[] = [];
   if (selectedClientId) {
-    agingRecords = getFilteredAR().filter(ar => ar.clientId === selectedClientId).map(ar => {
-      const client = clients.find(c => c.id === ar.clientId);
-      const invoice = getFilteredInvoices().find(i => i.id === ar.invoiceId);
+    agingRecords = getFilteredAR().filter((ar: AccountsReceivableRecord) => ar.clientId === selectedClientId).map((ar: AccountsReceivableRecord) => {
+      const client = clients.find((c: Client) => c.id === ar.clientId);
+      const invoice = getFilteredInvoices().find((i: Invoice) => i.id === ar.invoiceId);
       return {
         ...ar,
         clientName: client?.name ?? 'Unknown',
@@ -329,16 +348,16 @@ const ReportsContent: React.FC = () => {
       };
     });
   } else {
-    const grouped = new Map<string, any[]>();
-    getFilteredAR().forEach(ar => {
+    const grouped = new Map<string, AccountsReceivableRecord[]>();
+    getFilteredAR().forEach((ar: AccountsReceivableRecord) => {
       if (!grouped.has(ar.clientId)) grouped.set(ar.clientId, []);
       grouped.get(ar.clientId)!.push(ar);
     });
     agingRecords = Array.from(grouped.entries()).map(([clientId, recs]) => {
-      const client = clients.find(c => c.id === clientId);
-      const statuses = Array.from(new Set(recs.map(r => r.status)));
+      const client = clients.find((c: Client) => c.id === clientId);
+      const statuses = Array.from(new Set(recs.map((r: AccountsReceivableRecord) => r.status)));
       const status = statuses.length === 1 ? statuses[0] : 'Mixed';
-      const validTimes = recs.map(r => new Date(r.invoiceDate).getTime()).filter(t => !isNaN(t));
+      const validTimes = recs.map((r: AccountsReceivableRecord) => new Date(r.invoiceDate).getTime()).filter(t => !isNaN(t));
       const maxDate = new Date(validTimes.length > 0 ? Math.max(...validTimes) : Date.now());
 
       return {
@@ -348,8 +367,8 @@ const ReportsContent: React.FC = () => {
         clientName: client?.name ?? 'Unknown',
         invoiceDate: maxDate.toISOString(),
         dueDate: maxDate.toISOString(),
-        amount: recs.reduce((sum, r) => sum + r.outstandingBalance, 0),
-        agingDays: Math.max(...recs.map(r => r.agingDays)),
+        amount: recs.reduce((sum: number, r: AccountsReceivableRecord) => sum + r.outstandingBalance, 0),
+        agingDays: Math.max(...recs.map((r: AccountsReceivableRecord) => r.agingDays)),
         agingBracket: 'Mixed',
         status: status,
         isGrouped: true
@@ -358,17 +377,17 @@ const ReportsContent: React.FC = () => {
   }
 
   // Filter aging records to only show those with 31+ days outstanding
-  agingRecords = agingRecords.filter(r => r.agingDays >= 31);
+  agingRecords = agingRecords.filter((r: any) => r.agingDays >= 31);
 
   // For bracket cards always count from ALL AR records (not grouped)
   const getAgingBracketData = (bracket: string) => {
     const base = selectedClientId
-      ? getFilteredAR().filter(r => r.clientId === selectedClientId)
+      ? getFilteredAR().filter((r: AccountsReceivableRecord) => r.clientId === selectedClientId)
       : getFilteredAR();
-    const recs = base.filter(r => r.agingBracket === bracket);
+    const recs = base.filter((r: AccountsReceivableRecord) => r.agingBracket === bracket);
     return {
       count: recs.length,
-      total: recs.reduce((sum, r) => sum + r.outstandingBalance, 0)
+      total: recs.reduce((sum: number, r: AccountsReceivableRecord) => sum + r.outstandingBalance, 0)
     };
   };
 
@@ -398,24 +417,24 @@ const ReportsContent: React.FC = () => {
   // ── 2. Invoice Summary Tab Data ────────────────────────────────
   let allInvoices: any[] = [];
   if (selectedClientId) {
-    allInvoices = getFilteredInvoices().filter(i => i.clientId === selectedClientId).map(i => {
-      const client = clients.find(c => c.id === i.clientId);
+    allInvoices = getFilteredInvoices().filter((i: Invoice) => i.clientId === selectedClientId).map((i: Invoice) => {
+      const client = clients.find((c: Client) => c.id === i.clientId);
       return {
         ...i,
         clientName: client?.name ?? 'Unknown'
       };
     });
   } else {
-    const grouped = new Map<string, any[]>();
-    getFilteredInvoices().forEach(inv => {
+    const grouped = new Map<string, Invoice[]>();
+    getFilteredInvoices().forEach((inv: Invoice) => {
       if (!grouped.has(inv.clientId)) grouped.set(inv.clientId, []);
       grouped.get(inv.clientId)!.push(inv);
     });
     allInvoices = Array.from(grouped.entries()).map(([clientId, recs]) => {
-      const client = clients.find(c => c.id === clientId);
-      const statuses = Array.from(new Set(recs.map(r => r.status)));
+      const client = clients.find((c: Client) => c.id === clientId);
+      const statuses = Array.from(new Set(recs.map((r: Invoice) => r.status)));
       const status = statuses.length === 1 ? statuses[0] : 'Mixed';
-      const validTimes = recs.map(r => new Date(r.createdAt).getTime()).filter(t => !isNaN(t));
+      const validTimes = recs.map((r: Invoice) => new Date(r.createdAt).getTime()).filter(t => !isNaN(t));
       const maxDate = new Date(validTimes.length > 0 ? Math.max(...validTimes) : Date.now());
 
       return {
@@ -425,18 +444,18 @@ const ReportsContent: React.FC = () => {
         clientName: client?.name ?? 'Unknown',
         createdAt: maxDate.toISOString(),
         dueDate: maxDate.toISOString(),
-        totalAmount: recs.reduce((sum, r) => sum + r.totalAmount, 0),
+        totalAmount: recs.reduce((sum: number, r: Invoice) => sum + r.totalAmount, 0),
         status: status,
         isGrouped: true
       };
     });
   }
 
-  const totalInvoiced = allInvoices.reduce((sum, i) => sum + i.totalAmount, 0);
-  const totalPaid = allInvoices.filter(i => i.status === 'Paid').reduce((sum, i) => sum + i.totalAmount, 0);
-  const totalOutstanding = allInvoices.filter(i => ['Sent', 'Overdue'].includes(i.status)).reduce((sum, i) => sum + i.totalAmount, 0);
+  const totalInvoiced = allInvoices.reduce((sum: number, i: any) => sum + i.totalAmount, 0);
+  const totalPaid = allInvoices.filter((i: any) => i.status === 'Paid').reduce((sum: number, i: any) => sum + i.totalAmount, 0);
+  const totalOutstanding = allInvoices.filter((i: any) => ['Sent', 'Overdue'].includes(i.status)).reduce((sum: number, i: any) => sum + i.totalAmount, 0);
 
-  const invoiceMonthlyData = allInvoices.reduce((acc, inv) => {
+  const invoiceMonthlyData = allInvoices.reduce((acc: Record<string, any>, inv: any) => {
     const date = new Date(inv.createdAt);
     const month = date.toLocaleString('default', { month: 'short', year: 'numeric' });
     if (!acc[month]) acc[month] = { name: month, Invoiced: 0, Paid: 0, Outstanding: 0 };
@@ -463,11 +482,11 @@ const ReportsContent: React.FC = () => {
 
   // ── 3. Collection Report Tab Data ──────────────────────────────
   let collections: any[] = [];
-  const baseCollections = getFilteredPayments().filter(p => p.status === 'Validated' || p.status === 'Approved');
+  const baseCollections = getFilteredPayments().filter((p: Payment) => p.status === 'Validated' || p.status === 'Approved');
   if (selectedClientId) {
-    collections = baseCollections.filter(p => p.clientId === selectedClientId).map(p => {
-      const client = clients.find(c => c.id === p.clientId);
-      const invoice = getFilteredInvoices().find(i => i.id === p.invoiceId);
+    collections = baseCollections.filter((p: Payment) => p.clientId === selectedClientId).map((p: Payment) => {
+      const client = clients.find((c: Client) => c.id === p.clientId);
+      const invoice = getFilteredInvoices().find((i: Invoice) => i.id === p.invoiceId);
       return {
         ...p,
         clientName: client?.name ?? 'Unknown',
@@ -475,14 +494,14 @@ const ReportsContent: React.FC = () => {
       };
     });
   } else {
-    const grouped = new Map<string, any[]>();
-    baseCollections.forEach(col => {
+    const grouped = new Map<string, Payment[]>();
+    baseCollections.forEach((col: Payment) => {
       if (!grouped.has(col.clientId)) grouped.set(col.clientId, []);
       grouped.get(col.clientId)!.push(col);
     });
     collections = Array.from(grouped.entries()).map(([clientId, recs]) => {
-      const client = clients.find(c => c.id === clientId);
-      const validTimes = recs.map(r => new Date(r.recordedAt).getTime()).filter(t => !isNaN(t));
+      const client = clients.find((c: Client) => c.id === clientId);
+      const validTimes = recs.map((r: Payment) => new Date(r.recordedAt).getTime()).filter(t => !isNaN(t));
       const maxDate = new Date(validTimes.length > 0 ? Math.max(...validTimes) : Date.now());
 
       return {
@@ -491,23 +510,23 @@ const ReportsContent: React.FC = () => {
         invoiceNumber: recs.length === 1 ? recs[0].invoiceNumber : '[Multiple]',
         clientName: client?.name ?? 'Unknown',
         paymentMethod: 'Mixed',
-        amount: recs.reduce((sum, r) => sum + r.amount, 0),
+        amount: recs.reduce((sum: number, r: Payment) => sum + r.amount, 0),
         recordedAt: maxDate.toISOString(),
         isGrouped: true
       };
     });
   }
 
-  const totalCollected = getFilteredPayments().filter(p => p.status === 'Validated' || p.status === 'Approved').reduce((sum, c) => sum + c.amount, 0);
+  const totalCollected = getFilteredPayments().filter((p: Payment) => p.status === 'Validated' || p.status === 'Approved').reduce((sum: number, c: Payment) => sum + c.amount, 0);
   // Breakdown by method from individual (non-grouped) payments
   const methodBreakdown = getFilteredPayments()
-    .filter(p => p.status === 'Validated' || p.status === 'Approved')
-    .reduce((acc, p) => {
+    .filter((p: Payment) => p.status === 'Validated' || p.status === 'Approved')
+    .reduce((acc: Record<string, number>, p: Payment) => {
       acc[p.paymentMethod] = (acc[p.paymentMethod] || 0) + p.amount;
       return acc;
     }, {} as Record<string, number>);
 
-  const collectionMonthlyData = baseCollections.reduce((acc, col) => {
+  const collectionMonthlyData = baseCollections.reduce((acc: Record<string, any>, col: Payment) => {
     if (selectedClientId && col.clientId !== selectedClientId) return acc;
     const date = new Date(col.recordedAt);
     const month = date.toLocaleString('default', { month: 'short', year: 'numeric' });
@@ -661,14 +680,14 @@ const ReportsContent: React.FC = () => {
             <div style={{ position: 'relative' }}>
               <select value={compileLedgerType} onChange={e => { setCompileLedgerType(e.target.value); setReportType(e.target.value === 'Aging of Accounts' ? 'aging' : e.target.value === 'Invoice Summary' ? 'invoices' : e.target.value === 'Collection Summary' ? 'collections' : 'duplicate'); }}
                 style={{ width: '100%', appearance: 'none', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 8, padding: '9px 32px 9px 12px', fontSize: '0.85rem', color: '#0F172A', cursor: 'pointer', outline: 'none' }}>
-                {(user?.role === 'Finance Manager' || user?.role === 'Head Accountant' || user?.role === 'Accountant') && (
+                {(user?.role === Role.FINANCIAL_MANAGER || user?.role === Role.HEAD_ACCOUNTANT || user?.role === Role.ACCOUNTANT) && (
                   <optgroup label="── Financial Reports ──">
                     <option value="Aging of Accounts">Aging of Accounts</option>
                     <option value="Invoice Summary">Invoice Summary</option>
                     <option value="Collection Summary">Collection Summary</option>
                   </optgroup>
                 )}
-                {(user?.role === 'Finance Manager' || user?.role === 'Head Accountant' || user?.role === 'Assistant of Finance Manager') && (
+                {(user?.role === Role.FINANCIAL_MANAGER || user?.role === Role.HEAD_ACCOUNTANT || user?.role === Role.ASSISTANT_FM) && (
                   <optgroup label="── Duplicate Detection ──">
                     <option value="Duplicate Alert Summary">Duplicate Alert Summary</option>
                     <option value="Unique Document Ledger">Unique Document Ledger</option>
@@ -710,7 +729,7 @@ const ReportsContent: React.FC = () => {
           </div>
 
           {/* Status Filter */}
-          {(user?.role === 'Head Accountant' || user?.role === 'Finance Manager') && (
+          {(user?.role === Role.HEAD_ACCOUNTANT || user?.role === Role.FINANCIAL_MANAGER) && (
             <div style={{ flex: '1 1 140px', minWidth: 130 }}>
               <label style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748B', display: 'block', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Status Filter</label>
               <div style={{ position: 'relative' }}>
@@ -743,9 +762,9 @@ const ReportsContent: React.FC = () => {
 
       {/* ══ ROW 3: Main Content (full-width) ══ */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
-        {selectedClientId && clients.find(c => c.id === selectedClientId) && (
+        {selectedClientId && clients.find((c: Client) => c.id === selectedClientId) && (
           <div style={{ marginBottom: -8 }}>
-            <ClientInfoCard client={clients.find(c => c.id === selectedClientId)!} />
+            <ClientInfoCard client={clients.find((c: Client) => c.id === selectedClientId)!} />
           </div>
         )}
 

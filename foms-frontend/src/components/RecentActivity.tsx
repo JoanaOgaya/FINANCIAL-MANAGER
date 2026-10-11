@@ -1,18 +1,9 @@
 import React from 'react';
 import { Card } from './Card';
-import { AuditLog } from '../data/seed';
+import type { AuditLog } from '../types/entities';
+import { formatRelative } from '../utils/format';
 
-// ── Helpers ─────────────────────────────────────────────────────────
-export function relativeTime(ts: string): string {
-  const diff = Date.now() - new Date(ts).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'Just now';
-  if (mins < 60) return `${mins} min${mins !== 1 ? 's' : ''} ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs} hr${hrs !== 1 ? 's' : ''} ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
-}
+export const relativeTime = formatRelative;
 
 export function getActionColor(action: string): string {
   if (action === 'LOGIN_SUCCESS' || action === 'RECOMMENDATION_APPROVED' || action === 'UNIQUE_SAVED' || action === 'DOCUMENT_SCAN') return '#10B981'; // Green

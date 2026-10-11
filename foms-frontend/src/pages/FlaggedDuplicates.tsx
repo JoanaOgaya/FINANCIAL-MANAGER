@@ -1,537 +1,582 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useFlaggedDuplicates } from '../hooks/useDuplicates';
+import { duplicatesService, type DuplicateFlagItem } from '../services/duplicates.service';
+import { DataTable, type Column } from '../components/shared/DataTable';
+import FilterBar from '../components/shared/FilterBar';
+import StatusBadge from '../components/shared/StatusBadge';
+import { PageHeader } from '../components/shared/PageHeader';
+import Button from '../components/Buttons';
+import ConfirmModal from '../components/shared/ConfirmModal';
 import { useToast } from '../components/ToastContext';
+import {
+  canDecideDuplicate,
+  canReviewDuplicate,
+  canApproveOwnCheck,
+  DUPLICATE_STATUS_LABELS,
+} from '../utils/duplicateWorkflow';
+import { DuplicateReviewPanel } from '../components/ai/DuplicateReviewPanel';
+import { ROLES } from '../types/auth';
 
-interface FlaggedDoc {
-  flagId: string;
-  type: string;
-  uploadedNumber: string;
-  existingRecord: string;
-  clientName: string;
-  amount: number;
-  similarity: number;
-  duplicateReason: string;
-  handlingAction: string;
-  flaggedBy: string;
-  flaggedByRole: string;
-  flaggedDate: string;
-  status: string;
-}
+type ActionModalType = 'mark_duplicate' | 'mark_not_duplicate' | 'approve' | 'return' | null;
 
-const ROWS_PER_PAGE_OPTIONS = [10, 25, 50];
-
-const ActionMenu: React.FC<{ doc: FlaggedDoc; role?: string; onAction: (action: string, doc: FlaggedDoc) => void }> = ({ doc, role, onAction }) => {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node) && btnRef.current && !btnRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
-
-  const toggleOpen = () => {
-    if (!open && btnRef.current) {
-      const rect = btnRef.current.getBoundingClientRect();
-      setPos({ top: rect.bottom + 4, left: rect.right - 168 });
-    }
-    setOpen(!open);
-  };
-
-  const isApprover = role === 'Head Accountant' || role === 'Finance Manager';
-
-  const actions = isApprover ? [
-    { label: 'View Details', icon: 'ti-eye' },
-    { label: 'Mark as Resolved', icon: 'ti-check' },
-    { label: 'Dismiss Flag', icon: 'ti-x' },
-    { label: 'Escalate', icon: 'ti-alert-triangle' },
-  ] : [
-    { label: 'View Details', icon: 'ti-eye' },
-    { label: 'Endorse to Manager', icon: 'ti-checkup-list' },
-  ];
-
-  return (
-    <div>
-      <button
-        ref={btnRef}
-        onClick={toggleOpen}
-        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '6px 10px', borderRadius: '6px', color: '#64748B', fontSize: '18px' }}
-      >
-        <i className="ti ti-dots-vertical" />
-      </button>
-      {open && (
-        <div ref={ref} style={{
-          position: 'fixed', left: pos.left, top: pos.top, zIndex: 99999,
-          background: '#fff', borderRadius: '10px', boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
-          border: '1px solid #E2E8F0', width: 168, padding: '6px 0',
-        }}>
-          {actions.map(a => (
-            <button
-              key={a.label}
-              onClick={() => { onAction(a.label, doc); setOpen(false); }}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-                padding: '9px 14px', background: 'none', border: 'none',
-                cursor: 'pointer', fontSize: '0.875rem', color: a.label === 'Dismiss Flag' ? '#EF4444' : '#0F172A',
-                textAlign: 'left', fontWeight: 500,
-              }}
-              onMouseEnter={e => (e.currentTarget.style.background = '#F8FAFC')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'none')}
-            >
-              <i className={`ti ${a.icon}`} style={{ fontSize: '15px', color: a.label === 'Dismiss Flag' ? '#EF4444' : '#64748B' }} />
-              {a.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
-
-const FlaggedDuplicates: React.FC = () => {
+export const FlaggedDuplicates: React.FC = () => {
   const { user } = useAuth();
-  const getToken = () => {
-    try {
-      const raw = sessionStorage.getItem('foms_session');
-      return raw ? JSON.parse(raw).accessToken : '';
-    } catch { return ''; }
-  };
-
-  const [data, setData] = useState<FlaggedDoc[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [docType, setDocType] = useState('');
-  const [viewMode, setViewMode] = useState<'list' | 'compact' | 'card'>('list');
-  const [rowsPerPage, setRowsPerPage] = useState(10);
-  const [page, setPage] = useState(1);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [selectedDoc, setSelectedDoc] = useState<FlaggedDoc | null>(null);
   const { toast } = useToast();
 
-  const fetchData = async () => {
-    setLoading(true);
+  const isHeadAccountant = user?.role === ROLES.HEAD_ACCOUNTANT;
+  const initialStatus = isHeadAccountant ? 'PENDING_REVIEW' : '';
+
+  const {
+    items,
+    total,
+    isLoading,
+    error,
+    refetch,
+    page,
+    setPage,
+    pageSize,
+    search,
+    setSearch,
+    statusFilter,
+    setStatusFilter,
+    dateFrom,
+    setDateFrom,
+    applyFilters,
+    resetFilters,
+    scope,
+  } = useFlaggedDuplicates({ initialStatus });
+
+  const [activeItem, setActiveItem] = useState<DuplicateFlagItem | null>(null);
+  const [modalAction, setModalAction] = useState<ActionModalType>(null);
+  const [remarks, setRemarks] = useState('');
+  const [validationError, setValidationError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [inspectDoc, setInspectDoc] = useState<DuplicateFlagItem | null>(null);
+  const [reviewPanelDoc, setReviewPanelDoc] = useState<DuplicateFlagItem | null>(null);
+
+  const currentUserId = user?.id || user?.employeeId;
+
+  const handleOpenAction = (item: DuplicateFlagItem, action: ActionModalType) => {
+    setActiveItem(item);
+    setModalAction(action);
+    setRemarks('');
+    setValidationError('');
+  };
+
+  const handleCloseModal = () => {
+    setActiveItem(null);
+    setModalAction(null);
+    setRemarks('');
+    setValidationError('');
+  };
+
+  const handleActionSubmit = async () => {
+    if (!activeItem || !modalAction) return;
+
+    // Both Level 1 decisions and Level 2 Return require remarks
+    if ((modalAction === 'mark_duplicate' || modalAction === 'mark_not_duplicate' || modalAction === 'return') && !remarks.trim()) {
+      setValidationError('Remarks and justification are required for this action.');
+      return;
+    }
+
+    // Separation of Duties check for Level 2 Approve
+    if (modalAction === 'approve') {
+      const sodCheck = canApproveOwnCheck(currentUserId, activeItem.decidedBy);
+      if (!sodCheck.allowed) {
+        setValidationError(sodCheck.reason || 'You cannot approve your own decision.');
+        return;
+      }
+    }
+
+    setIsSubmitting(true);
+    setValidationError('');
     try {
-      const res = await fetch('/api/ai/duplicates', {
-        headers: { 'Authorization': `Bearer ${getToken()}` }
-      });
-      let mapped: any[] = [];
-      if (res.ok) {
-        const json = await res.json();
-        mapped = (Array.isArray(json) ? json : []).map((a: any) => ({
-          flagId: String(a.id),
-          type: (a.confidence_score || 0) >= 95 ? 'EXACT MATCH' : 'PARTIAL MATCH',
-          uploadedNumber: a.source_record_id || 'N/A',
-          existingRecord: a.matched_record_id || 'N/A',
-          clientName: a.matched_fields?.clientName || 'N/A',
-          amount: parseFloat(String(a.matched_fields?.amount || '0.00')),
-          similarity: a.confidence_score || 0,
-          duplicateReason: a.match_reason || 'AI parameter match',
-          handlingAction: a.status || 'Pending Review',
-          flaggedBy: 'AI Gemini System',
-          flaggedByRole: 'AI Model',
-          flaggedDate: a.created_at ? new Date(a.created_at).toLocaleDateString() : new Date().toLocaleDateString(),
-          status: 'Pending',
-        }));
+      const reviewerName = user?.fullName || user?.employeeId || 'Reviewer';
+      if (modalAction === 'mark_duplicate') {
+        await duplicatesService.decideDuplicate(activeItem.id, {
+          decision: 'DUPLICATE',
+          remarks: remarks.trim(),
+          reviewer: reviewerName,
+        });
+        toast.success(`Marked flag ${activeItem.flagId} as Duplicate. Forwarded to Head Accountant for Review.`);
+      } else if (modalAction === 'mark_not_duplicate') {
+        await duplicatesService.decideDuplicate(activeItem.id, {
+          decision: 'NOT_DUPLICATE',
+          remarks: remarks.trim(),
+          reviewer: reviewerName,
+        });
+        toast.info(`Marked flag ${activeItem.flagId} as Not Duplicate. Forwarded to Head Accountant for Review.`);
+      } else if (modalAction === 'approve') {
+        await duplicatesService.reviewDecision(activeItem.id, {
+          action: 'APPROVE',
+          remarks: remarks.trim() || undefined,
+          reviewer: reviewerName,
+        });
+        toast.success(`Approved decision for ${activeItem.flagId}. Official status updated.`);
+      } else if (modalAction === 'return') {
+        await duplicatesService.reviewDecision(activeItem.id, {
+          action: 'RETURN',
+          remarks: remarks.trim(),
+          reviewer: reviewerName,
+        });
+        toast.warning(`Returned flag ${activeItem.flagId} to Accountant with remarks.`);
       }
-      
-      if (mapped.length === 0) {
-        mapped = [
-            { flagId: 'FLAG-001', type: 'EXACT MATCH', uploadedNumber: 'INV-1004', existingRecord: 'INV-1004', clientName: 'ACME Corp', amount: 15500.00, similarity: 100, duplicateReason: 'Same OR number and Amount', handlingAction: 'Flag and Block', flaggedBy: 'AI Gemini System', flaggedByRole: 'AI Model', flaggedDate: '10/02/2023', status: 'Pending' },
-            { flagId: 'FLAG-002', type: 'PARTIAL MATCH', uploadedNumber: 'OR-5501', existingRecord: 'OR-5501-A', clientName: 'Globex Inc', amount: 8250.00, similarity: 92, duplicateReason: 'Similar Number, Exact Date/Amount', handlingAction: 'Flag for Review', flaggedBy: 'AI Gemini System', flaggedByRole: 'AI Model', flaggedDate: '10/03/2023', status: 'Pending' },
-            { flagId: 'FLAG-003', type: 'EXACT MATCH', uploadedNumber: 'CTC-3392', existingRecord: 'CTC-3392', clientName: 'Initech', amount: 0.00, similarity: 100, duplicateReason: 'Exact visual match of CTC Document', handlingAction: 'Flag and Block', flaggedBy: 'AI Gemini System', flaggedByRole: 'AI Model', flaggedDate: '10/04/2023', status: 'Pending' }
-        ];
-      }
-      setData(mapped);
-    } catch (e) {
-      console.error(e);
-      setData([
-          { flagId: 'FLAG-001', type: 'EXACT MATCH', uploadedNumber: 'INV-1004', existingRecord: 'INV-1004', clientName: 'ACME Corp', amount: 15500.00, similarity: 100, duplicateReason: 'Same OR number and Amount', handlingAction: 'Flag and Block', flaggedBy: 'AI Gemini System', flaggedByRole: 'AI Model', flaggedDate: '10/02/2023', status: 'Pending' },
-          { flagId: 'FLAG-002', type: 'PARTIAL MATCH', uploadedNumber: 'OR-5501', existingRecord: 'OR-5501-A', clientName: 'Globex Inc', amount: 8250.00, similarity: 92, duplicateReason: 'Similar Number, Exact Date/Amount', handlingAction: 'Flag for Review', flaggedBy: 'AI Gemini System', flaggedByRole: 'AI Model', flaggedDate: '10/03/2023', status: 'Pending' }
-      ]);
-      console.error(e);
+      handleCloseModal();
+      refetch();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Action failed to execute.');
     } finally {
-      setLoading(false);
+      setIsSubmitting(false);
     }
   };
 
-  useEffect(() => {
-    fetchData();
-  }, []);
+  const columns: Column<DuplicateFlagItem>[] = [
+    {
+      key: 'flagId',
+      label: 'FLAG ID',
+      render: (row) => <span style={{ fontWeight: 700, color: '#0F172A' }}>{row.flagId}</span>,
+    },
+    {
+      key: 'type',
+      label: 'MATCH TYPE',
+      render: (row) => {
+        const sim = row.similarity ?? 0;
+        return (
+          <span
+            style={{
+              display: 'inline-block',
+              padding: '2px 8px',
+              borderRadius: '6px',
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              background: sim >= 95 ? '#FEF2F2' : '#FFFBEB',
+              color: sim >= 95 ? '#EF4444' : '#D97706',
+            }}
+          >
+            {row.matchType || (sim >= 95 ? 'EXACT MATCH' : 'PARTIAL MATCH')}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'uploadedNumber',
+      label: 'SOURCE DOC #',
+      render: (row) => <span>{row.uploadedNumber ?? 'N/A'}</span>,
+    },
+    {
+      key: 'existingRecord',
+      label: 'MATCHED RECORD',
+      render: (row) => <span style={{ color: '#4338CA', fontWeight: 600 }}>{row.existingRecord ?? 'N/A'}</span>,
+    },
+    {
+      key: 'clientName',
+      label: 'CLIENT NAME',
+      render: (row) => <span>{row.clientName ?? 'N/A'}</span>,
+    },
+    {
+      key: 'similarity',
+      label: 'SIMILARITY',
+      render: (row) => (
+        <span style={{ fontWeight: 700, color: (row.similarity ?? 0) >= 95 ? '#EF4444' : '#D97706' }}>
+          {row.similarity !== undefined ? `${row.similarity}%` : 'N/A'}
+        </span>
+      ),
+    },
+    {
+      key: 'status',
+      label: 'STATUS',
+      render: (row) => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <StatusBadge status={row.status} />
+          {row.decidedRemarks && (
+            <span
+              style={{
+                fontSize: '0.75rem',
+                color: '#64748B',
+                fontStyle: 'italic',
+                maxWidth: 180,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={row.decidedRemarks}
+            >
+              "{row.decidedRemarks}"
+            </span>
+          )}
+        </div>
+      ),
+    },
+  ];
 
-  const filtered = data.filter(d => {
-    const matchSearch =
-      !search ||
-      String(d.flagId).includes(search) ||
-      d.uploadedNumber.toLowerCase().includes(search.toLowerCase()) ||
-      d.existingRecord.toLowerCase().includes(search.toLowerCase()) ||
-      d.clientName.toLowerCase().includes(search.toLowerCase());
-    const matchType = !docType || d.type === docType;
-    return matchSearch && matchType;
-  });
+  const filterFields = [
+    {
+      key: 'status',
+      label: 'STATUS',
+      type: 'select' as const,
+      options: [
+        { label: 'All Statuses', value: '' },
+        { label: 'Flagged (Unverified)', value: 'FLAGGED' },
+        { label: 'Pending Review (Level 2)', value: 'PENDING_REVIEW' },
+        { label: 'Returned for Re-decision', value: 'RETURNED' },
+        { label: 'Approved Duplicate', value: 'APPROVED_DUPLICATE' },
+        { label: 'Cleared (Not Duplicate)', value: 'CLEARED_NOT_DUPLICATE' },
+      ],
+    },
+    {
+      key: 'dateFrom',
+      label: 'FLAGGED DATE',
+      type: 'date' as const,
+    },
+  ];
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / rowsPerPage));
-  const paged = filtered.slice((page - 1) * rowsPerPage, page * rowsPerPage);
-
-  const toggleSelect = (id: string) => {
-    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  const filterValues = {
+    status: statusFilter,
+    dateFrom,
   };
-  const toggleSelectAll = () => {
-    if (selectedIds.length === paged.length) setSelectedIds([]);
-    else setSelectedIds(paged.map(d => d.flagId));
-  };
 
-  const handleAction = (action: string, doc: FlaggedDoc) => {
-    if (action === 'View Details') {
-      setSelectedDoc(doc);
-    } else if (action === 'Mark as Resolved') {
-      setData(prev => prev.map(d => d.flagId === doc.flagId ? { ...d, handlingAction: 'Resolved', status: 'Resolved' } : d));
-      toast.success('Document marked as resolved.');
-    } else if (action === 'Dismiss Flag') {
-      setData(prev => prev.map(d => d.flagId === doc.flagId ? { ...d, handlingAction: 'Dismissed', status: 'Dismissed' } : d));
-      toast.info('Flag dismissed.');
-    } else if (action === 'Escalate') {
-      setData(prev => prev.map(d => d.flagId === doc.flagId ? { ...d, handlingAction: 'Escalated', status: 'Escalated' } : d));
-      toast.success('Document escalated for further review.');
-    } else if (action === 'Endorse to Manager') {
-      setData(prev => prev.map(d => d.flagId === doc.flagId ? { ...d, handlingAction: 'Endorsed', status: 'Endorsed' } : d));
-      toast.success('Document endorsed to Manager.');
-    } else {
-      toast.info(`Action '${action}' triggered for ${doc.flagId}`);
-    }
-  };
-
-  const handleExport = () => {
-    const csv = [
-      ['Flag ID', 'Type', 'Uploaded Number', 'Existing Record', 'Client Name', 'Amount', 'Similarity', 'Duplicate Reason', 'Handling Action', 'Flagged By', 'Flagged Date', 'Status'].join(','),
-      ...filtered.map(d => [d.flagId, d.type, d.uploadedNumber, d.existingRecord, d.clientName, d.amount, d.similarity + '%', d.duplicateReason, d.handlingAction, d.flaggedBy, d.flaggedDate, d.status].join(','))
-    ].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'flagged-duplicates.csv';
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const similarityColor = (v: number) => {
-    if (v >= 95) return '#EF4444';
-    if (v >= 80) return '#F59E0B';
-    return '#64748B';
-  };
-
-  const handlingBadge = (action: string) => {
-    if (action === 'Pending Review') return { bg: '#FEF3C7', color: '#D97706' };
-    if (action === 'Resolved') return { bg: '#F0FDF4', color: '#16A34A' };
-    if (action === 'Escalated') return { bg: '#FEE2E2', color: '#DC2626' };
-    if (action === 'Endorsed') return { bg: '#E0E7FF', color: '#4338CA' };
-    if (action === 'Dismissed') return { bg: '#F3F4F6', color: '#4B5563' };
-    return { bg: '#F1F5F9', color: '#64748B' };
-  };
-
-  const statusBadge = (status: string) => {
-    if (status === 'Pending') return { bg: '#FEF2F2', color: '#EF4444', border: '#FECACA' };
-    if (status === 'Resolved') return { bg: '#F0FDF4', color: '#16A34A', border: '#BBF7D0' };
-    if (status === 'Escalated') return { bg: '#FEF2F2', color: '#DC2626', border: '#FECACA' };
-    if (status === 'Endorsed') return { bg: '#EEF2FF', color: '#4338CA', border: '#C7D2FE' };
-    if (status === 'Dismissed') return { bg: '#F8FAFC', color: '#64748B', border: '#E2E8F0' };
-    return { bg: '#F1F5F9', color: '#64748B', border: '#E2E8F0' };
+  const handleFieldChange = (key: string, value: string) => {
+    if (key === 'status') setStatusFilter(value);
+    if (key === 'dateFrom') setDateFrom(value);
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <PageHeader
+        title={isHeadAccountant ? 'Duplicate Review Queue' : 'Flagged Duplicates'}
+        subtitle={
+          isHeadAccountant
+            ? 'Level 2 Review Queue: Verify and approve or return duplicate decisions made by Accountants.'
+            : scope === 'liquidation'
+            ? 'Level 1: Decide on flagged duplicate liquidation expenses and vouchers.'
+            : scope === 'own'
+            ? 'Level 1: Review AI-flagged duplicate documents and mark as Duplicate or Not Duplicate.'
+            : 'Review, decide, and approve AI-flagged duplicate documents across accounts.'
+        }
+      />
 
+      {scope === 'liquidation' && (
+        <div
+          style={{
+            padding: '8px 14px',
+            background: '#F0F9FF',
+            border: '1px solid #BAE6FD',
+            borderRadius: '8px',
+            fontSize: '0.8rem',
+            color: '#0369A1',
+            fontWeight: 600,
+          }}
+        >
+          <i className="ti ti-filter" style={{ marginRight: 6 }} />
+          Assistant FM Scope: Liquidation &amp; Expense Documents Only
+        </div>
+      )}
 
-      {/* Table Card */}
-      <div style={{ background: '#fff', borderRadius: '12px', padding: '24px', flex: 1, display: 'flex', flexDirection: 'column' }}>
+      <FilterBar
+        searchValue={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Search flags, doc number, client…"
+        fields={filterFields}
+        values={filterValues}
+        onFieldChange={handleFieldChange}
+        onApply={applyFilters}
+        onReset={resetFilters}
+      />
 
-        {/* Table Top Bar */}
-        <div style={{ paddingBottom: '20px' }}>
-          <div style={{ fontWeight: 800, fontSize: '1.2rem', color: '#0F172A', marginBottom: 14 }}>
-            Flagged Duplicate Documents
-          </div>
+      <DataTable
+        rows={items}
+        columns={columns}
+        rowKey={(r) => r.id}
+        total={total}
+        page={page}
+        pageSize={pageSize}
+        onPageChange={setPage}
+        isLoading={isLoading}
+        error={error}
+        onRetry={refetch}
+        emptyMessage="No flagged duplicate documents found."
+        renderActions={(row) => {
+          const canDecide = canDecideDuplicate(user?.role, row.status, row.documentType);
+          const canReview = canReviewDuplicate(user?.role, row.status, row.documentType);
+          const sodCheck = canApproveOwnCheck(currentUserId, row.decidedBy);
 
-          {/* Decision Support Notice */}
-          <div style={{ marginBottom: 24 }}>
-            <p style={{ margin: 0, fontSize: '0.875rem', color: '#0F172A', lineHeight: 1.6 }}>
-              AI-generated results are provided as decision support only. Final validation and official record updates must be performed by an authorized finance user{' '}
-              <strong>through the existing FOMS workflow.</strong>
-            </p>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            {/* Search */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#EAEDF3', border: 'none', borderRadius: '28px', padding: '0 16px', height: '42px', flex: '1 1 200px', maxWidth: 320 }}>
-              <i className="ti ti-search" style={{ color: '#49454F', fontSize: '16px' }} />
-              <input
-                value={search}
-                onChange={e => { setSearch(e.target.value); setPage(1); }}
-                placeholder="Search by ID, Doc #, Client..."
-                style={{ border: 'none', outline: 'none', background: 'transparent', fontSize: '0.9375rem', color: '#1C1B1F', width: '100%' }}
+          return (
+            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
+              <Button
+                title="Inspect"
+                variant="secondary"
+                size="sm"
+                onClick={() => setInspectDoc(row)}
               />
+
+              {/* Level 1: Accountant / Asst FM Decision Actions */}
+              {canDecide && (
+                <>
+                  <Button
+                    title="Mark Real Duplicate"
+                    variant="danger"
+                    size="sm"
+                    onClick={() => handleOpenAction(row, 'mark_duplicate')}
+                  />
+                  <Button
+                    title="Mark False Positive"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => handleOpenAction(row, 'mark_not_duplicate')}
+                  />
+                </>
+              )}
+
+              {/* Level 2: Head Accountant / FM Review Actions */}
+              {canReview && (
+                <>
+                  <Button
+                    title="Review"
+                    variant="primary"
+                    size="sm"
+                    onClick={() => setReviewPanelDoc(row)}
+                  />
+                  {sodCheck.allowed ? (
+                    <Button
+                      title="Approve"
+                      variant="success"
+                      size="sm"
+                      onClick={() => handleOpenAction(row, 'approve')}
+                    />
+                  ) : (
+                    <span
+                      style={{
+                        fontSize: '0.75rem',
+                        color: '#EF4444',
+                        fontWeight: 600,
+                        padding: '4px 8px',
+                        background: '#FEF2F2',
+                        borderRadius: 4,
+                        border: '1px solid #FECACA',
+                      }}
+                      title="You cannot approve your own decision"
+                    >
+                      Cannot Self-Approve
+                    </span>
+                  )}
+                  <Button
+                    title="Return"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => handleOpenAction(row, 'return')}
+                  />
+                </>
+              )}
             </div>
+          );
+        }}
+      />
 
-            {/* Document Type Filter */}
-            <div style={{ position: 'relative' }}>
-              <select
-                value={docType}
-                onChange={e => { setDocType(e.target.value); setPage(1); }}
-                style={{
-                  appearance: 'none', background: '#F8FAFC', border: '1px solid #E2E8F0',
-                  borderRadius: '8px', padding: '8px 32px 8px 12px', fontSize: '0.875rem',
-                  color: '#0F172A', cursor: 'pointer', outline: 'none',
-                }}
-              >
-                <option value="">Document Type</option>
-                <option value="EXACT MATCH">Exact Match</option>
-                <option value="PARTIAL MATCH">Partial Match</option>
-              </select>
-              <i className="ti ti-chevron-down" style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: '#64748B', fontSize: '13px', pointerEvents: 'none' }} />
-            </div>
-
-            {/* Refresh icon */}
-            <button onClick={fetchData} style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '7px', padding: '7px 10px', cursor: 'pointer', color: '#64748B', fontSize: '15px' }}>
-              <i className={`ti ti-refresh ${loading ? 'spin-icon' : ''}`} />
-            </button>
-
-            <div style={{ flex: 1 }} />
-
-
-
-            {/* Export */}
-            <button
-              onClick={handleExport}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                background: '#F1F5F9', border: 'none', borderRadius: '8px',
-                padding: '8px 14px', fontSize: '0.875rem', fontWeight: 600,
-                color: '#475569', cursor: 'pointer',
+      {/* Level 1 & Level 2 Action Modal */}
+      {modalAction && activeItem && (
+        <ConfirmModal
+          isOpen={true}
+          title={
+            modalAction === 'mark_duplicate'
+              ? `Mark Real Duplicate — ${activeItem.flagId}`
+              : modalAction === 'mark_not_duplicate'
+              ? `Mark False Positive — ${activeItem.flagId}`
+              : modalAction === 'approve'
+              ? `Approve Decision — ${activeItem.flagId}`
+              : `Return to Accountant — ${activeItem.flagId}`
+          }
+          message={
+            modalAction === 'mark_duplicate'
+              ? `Marking ${activeItem.uploadedNumber} as a duplicate of ${activeItem.existingRecord}. This moves the record to PENDING_REVIEW for Head Accountant supervisor approval.`
+              : modalAction === 'mark_not_duplicate'
+              ? `Marking ${activeItem.uploadedNumber} as legitimate and NOT a duplicate. This moves the record to PENDING_REVIEW for Head Accountant supervisor approval.`
+              : modalAction === 'approve'
+              ? `Approve the Accountant's decision on ${activeItem.flagId}? Official system records will be updated upon your approval.`
+              : `Returning flag ${activeItem.flagId} back to the Accountant for re-examination. Please provide required remarks explaining why.`
+          }
+          variant={modalAction === 'mark_duplicate' ? 'danger' : 'primary'}
+          confirmLabel={
+            isSubmitting
+              ? 'Processing…'
+              : modalAction === 'mark_duplicate'
+              ? 'Mark Real Duplicate'
+              : modalAction === 'mark_not_duplicate'
+              ? 'Mark False Positive'
+              : modalAction === 'approve'
+              ? 'Approve'
+              : 'Return'
+          }
+          onCancel={handleCloseModal}
+          onConfirm={handleActionSubmit}
+        >
+          <div style={{ marginTop: 12 }}>
+            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: 4 }}>
+              {modalAction === 'approve'
+                ? 'Approval Notes (Optional)'
+                : 'Justification Remarks (Required) *'}
+            </label>
+            <textarea
+              value={remarks}
+              onChange={(e) => {
+                setRemarks(e.target.value);
+                if (validationError) setValidationError('');
               }}
-            >
-              <i className="ti ti-download" style={{ fontSize: '15px' }} />
-              Export
-            </button>
+              placeholder={
+                modalAction === 'mark_duplicate'
+                  ? 'Required: Explain why this record is confirmed as a duplicate...'
+                  : modalAction === 'mark_not_duplicate'
+                  ? 'Required: Explain why this document is unique and not a duplicate...'
+                  : modalAction === 'return'
+                  ? 'Required: Explain why the decision is returned to the Accountant...'
+                  : 'Optional approval notes...'
+              }
+              rows={3}
+              style={{
+                width: '100%',
+                padding: '8px 10px',
+                borderRadius: '6px',
+                border: `1px solid ${validationError ? '#EF4444' : '#CBD5E1'}`,
+                fontSize: '0.85rem',
+                fontFamily: 'inherit',
+                boxSizing: 'border-box',
+              }}
+            />
+            {validationError && (
+              <span style={{ color: '#DC2626', fontSize: '0.78rem', fontWeight: 600, marginTop: 4, display: 'block' }}>
+                {validationError}
+              </span>
+            )}
           </div>
-        </div>
+        </ConfirmModal>
+      )}
 
-        {/* Table */}
-        <div style={{ overflowX: 'auto', border: '1px solid #E2E8F0', borderRadius: '8px' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1200 }}>
-            <thead>
-              <tr style={{ background: '#F8FAFC' }}>
+      {/* Level 2 Side-by-Side Review Panel */}
+      {reviewPanelDoc && (
+        <DuplicateReviewPanel
+          isOpen={true}
+          item={reviewPanelDoc}
+          onClose={() => setReviewPanelDoc(null)}
+          onApprove={async (apprRemarks) => {
+            try {
+              await duplicatesService.reviewDecision(reviewPanelDoc.id, {
+                action: 'APPROVE',
+                remarks: apprRemarks,
+                reviewer: user?.fullName || user?.employeeId || 'Reviewer',
+              });
+              toast.success(`Approved duplicate decision for ${reviewPanelDoc.flagId}.`);
+              setReviewPanelDoc(null);
+              refetch();
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : 'Approval failed.');
+            }
+          }}
+          onReturn={async (retRemarks) => {
+            try {
+              await duplicatesService.reviewDecision(reviewPanelDoc.id, {
+                action: 'RETURN',
+                remarks: retRemarks,
+                reviewer: user?.fullName || user?.employeeId || 'Reviewer',
+              });
+              toast.warning(`Returned flag ${reviewPanelDoc.flagId} to Accountant.`);
+              setReviewPanelDoc(null);
+              refetch();
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : 'Return failed.');
+            }
+          }}
+        />
+      )}
 
-                {[
-                  'FLAG ID', 'TYPE', 'UPLOADED NUMBER', 'EXISTING RECORD',
-                  'CLIENT NAME', 'AMOUNT', 'SIMILARITY', 'DUPLICATE REASON',
-                  'HANDLING ACTION', 'FLAGGED BY', 'FLAGGED DATE', 'STATUS', 'ACTIONS'
-                ].map(col => (
-                  <th key={col} style={{
-                    padding: '12px 16px', textAlign: 'left',
-                    fontSize: '0.72rem', fontWeight: 700, color: '#64748B',
-                    letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap',
-                  }}>
-                    {col !== 'ACTIONS' ? (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
-                        {col} <i className="ti ti-arrows-sort" style={{ fontSize: '11px', opacity: 0.6 }} />
-                      </span>
-                    ) : col}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan={13} style={{ padding: '60px 20px', textAlign: 'center' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-                      <i className="ti ti-loader spin-icon" style={{ fontSize: '28px', color: '#0D9488' }} />
-                      <div style={{ fontSize: '0.875rem', color: '#64748B', fontWeight: 600 }}>Loading flagged duplicates...</div>
-                    </div>
-                  </td>
-                </tr>
-              ) : paged.length === 0 ? (
-                <tr>
-                  <td colSpan={13} style={{ padding: '60px 20px', textAlign: 'center' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-                      <div style={{ width: 48, height: 48, borderRadius: '10px', background: '#F1F5F9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <i className="ti ti-flag-off" style={{ fontSize: '22px', color: '#94A3B8' }} />
-                      </div>
-                      <div>
-                        <div style={{ fontWeight: 700, color: '#0F172A', marginBottom: 4 }}>No flagged duplicates found.</div>
-                        <div style={{ fontSize: '0.875rem', color: '#94A3B8' }}>All documents appear to be unique.</div>
-                      </div>
-                    </div>
-                  </td>
-                </tr>
-              ) : paged.map((doc, i) => {
-                const hb = handlingBadge(doc.handlingAction);
-                return (
-                  <tr
-                    key={doc.flagId}
-                    style={{
-                      borderBottom: '1px solid #F1F5F9',
-                      background: i % 2 === 0 ? '#fff' : '#FAFAFA',
-                      transition: 'background 0.15s',
-                    }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#F8FAFC'; }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = i % 2 === 0 ? '#fff' : '#FAFAFA'; }}
-                  >
-                    <td style={{ padding: '14px 16px', fontSize: '0.875rem', fontWeight: 700, color: '#0F172A' }}>{doc.flagId}</td>
-                    <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
-                      <span style={{
-                        background: doc.type === 'EXACT MATCH' ? '#FEF2F2' : '#FEF3C7',
-                        color: doc.type === 'EXACT MATCH' ? '#EF4444' : '#D97706',
-                        padding: '4px 10px', borderRadius: '9999px',
-                        fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.02em',
-                      }}>
-                        {doc.type}
-                      </span>
-                    </td>
-                    <td style={{ padding: '14px 16px', fontSize: '0.875rem', color: '#0F172A', whiteSpace: 'nowrap', fontFamily: 'monospace' }}>{doc.uploadedNumber}</td>
-                    <td style={{ padding: '14px 16px', fontSize: '0.875rem', color: '#0F172A', whiteSpace: 'nowrap', fontFamily: 'monospace' }}>{doc.existingRecord}</td>
-                    <td style={{ padding: '14px 16px', fontSize: '0.875rem', color: '#475569', whiteSpace: 'nowrap' }}>{doc.clientName}</td>
-                    <td style={{ padding: '14px 16px', fontSize: '0.875rem', fontWeight: 700, color: '#0F172A', whiteSpace: 'nowrap' }}>
-                      ₱{doc.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                    </td>
-                    <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
-                      <span style={{ fontWeight: 800, fontSize: '0.9375rem', color: similarityColor(doc.similarity) }}>
-                        {doc.similarity}%
-                      </span>
-                    </td>
-                    <td style={{ padding: '14px 16px', fontSize: '0.875rem', color: '#475569', whiteSpace: 'nowrap' }}>{doc.duplicateReason}</td>
-                    <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
-                      <span style={{ background: hb.bg, color: hb.color, padding: '4px 10px', borderRadius: '9999px', fontSize: '0.75rem', fontWeight: 700 }}>
-                        {doc.handlingAction}
-                      </span>
-                    </td>
-                    <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
-                      <div style={{ fontWeight: 600, fontSize: '0.875rem', color: '#0F172A', lineHeight: 1.2 }}>{doc.flaggedBy}</div>
-                      <div style={{ fontSize: '0.75rem', color: '#94A3B8', marginTop: 2 }}>{doc.flaggedByRole}</div>
-                    </td>
-                    <td style={{ padding: '14px 16px', fontSize: '0.875rem', color: '#475569', whiteSpace: 'nowrap' }}>{doc.flaggedDate}</td>
-                    <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
-                      <span style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 5,
-                        background: statusBadge(doc.status).bg, color: statusBadge(doc.status).color,
-                        padding: '4px 10px', borderRadius: '9999px',
-                        fontSize: '0.75rem', fontWeight: 700, border: `1px solid ${statusBadge(doc.status).border}`,
-                      }}>
-                        {doc.status === 'Pending' && <i className="ti ti-clock" style={{ fontSize: '12px' }} />}
-                        {doc.status === 'Resolved' && <i className="ti ti-check" style={{ fontSize: '12px' }} />}
-                        {doc.status === 'Escalated' && <i className="ti ti-alert-circle" style={{ fontSize: '12px' }} />}
-                        {doc.status}
-                      </span>
-                    </td>
-                    <td style={{ padding: '14px 8px' }}>
-                      <ActionMenu doc={doc} role={user?.role} onAction={handleAction} />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Pagination */}
-        <div style={{
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          paddingTop: '14px', marginTop: '14px', flexWrap: 'wrap', gap: 10,
-        }}>
-          <span style={{ fontSize: '0.875rem', color: '#64748B' }}>
-            {filtered.length === 0 ? 'No records' : `${filtered.length} record${filtered.length !== 1 ? 's' : ''}`}
-          </span>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: '0.875rem', color: '#64748B' }}>Rows per page</span>
-              <select
-                value={rowsPerPage}
-                onChange={e => { setRowsPerPage(Number(e.target.value)); setPage(1); }}
-                style={{ border: '1px solid #E2E8F0', borderRadius: '6px', padding: '5px 10px', fontSize: '0.875rem', outline: 'none', cursor: 'pointer' }}
+      {/* Inspect Modal */}
+      {inspectDoc && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.5)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+          onClick={() => setInspectDoc(null)}
+        >
+          <div
+            style={{
+              background: '#fff',
+              borderRadius: 12,
+              padding: 24,
+              maxWidth: 520,
+              width: '90%',
+              boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: '#0F172A' }}>
+                Flag Inspection — {inspectDoc.flagId}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setInspectDoc(null)}
+                style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#64748B' }}
               >
-                {ROWS_PER_PAGE_OPTIONS.map(n => <option key={n} value={n}>{n}</option>)}
-              </select>
+                &times;
+              </button>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <button onClick={() => setPage(1)} disabled={page === 1} style={pgBtn(page === 1)}>«</button>
-              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} style={pgBtn(page === 1)}>‹</button>
-              {Array.from({ length: totalPages }, (_, i) => i + 1).filter(p => Math.abs(p - page) <= 2).map(p => (
-                <button key={p} onClick={() => setPage(p)} style={{ ...pgBtn(false), background: p === page ? '#0D9488' : '#F1F5F9', color: p === page ? '#fff' : '#475569', fontWeight: p === page ? 700 : 500 }}>
-                  {p}
-                </button>
-              ))}
-              <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages} style={pgBtn(page === totalPages)}>›</button>
-              <button onClick={() => setPage(totalPages)} disabled={page === totalPages} style={pgBtn(page === totalPages)}>»</button>
-            </div>
-          </div>
-        </div>
-      </div>
-      
-      {selectedDoc && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: '#fff', padding: 32, borderRadius: 16, width: 850, maxWidth: '95%', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)' }}>
-            <h3 style={{ marginTop: 0, marginBottom: 20, color: '#0F172A', fontSize: '1.25rem', fontWeight: 800 }}>Flagged Duplicate Details</h3>
-            
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 32, marginBottom: 24 }}>
-              {/* Document Images (Uploaded vs Existing) */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                 <div style={{ fontSize: '0.875rem', fontWeight: 700, color: '#0F172A' }}>Uploaded Document ({selectedDoc.uploadedNumber})</div>
-                 <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 8, padding: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', height: 160, overflow: 'hidden' }}>
-                    <img src="https://images.unsplash.com/photo-1607593630650-6a75fba189fb?q=80&w=400&auto=format&fit=crop" alt="Uploaded Document" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 4 }} />
-                 </div>
-                 
-                 <div style={{ fontSize: '0.875rem', fontWeight: 700, color: '#0F172A', marginTop: 8 }}>Matching Existing Record ({selectedDoc.existingRecord})</div>
-                 <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 8, padding: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', height: 160, overflow: 'hidden' }}>
-                    <img src="https://images.unsplash.com/photo-1607593630650-6a75fba189fb?q=80&w=400&auto=format&fit=crop" alt="Existing Document" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 4 }} />
-                 </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: '0.85rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#64748B' }}>Source Document:</span>
+                <strong>{inspectDoc.uploadedNumber}</strong>
               </div>
-              
-              {/* Document Info */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                <div style={{ background: '#FEF2F2', border: '1px solid #FCA5A5', padding: '12px 16px', borderRadius: 8, marginBottom: 8 }}>
-                  <div style={{ fontSize: '0.75rem', color: '#991B1B', fontWeight: 800, textTransform: 'uppercase', marginBottom: 4 }}>AI Flag Reason</div>
-                  <div style={{ fontSize: '0.875rem', color: '#7F1D1D', fontWeight: 600 }}>{selectedDoc.duplicateReason}</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#64748B' }}>Matched Record:</span>
+                <strong style={{ color: '#4338CA' }}>{inspectDoc.existingRecord}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#64748B' }}>Client Name:</span>
+                <span>{inspectDoc.clientName}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#64748B' }}>AI Similarity:</span>
+                <strong style={{ color: (inspectDoc.similarity ?? 0) >= 95 ? '#EF4444' : '#D97706' }}>
+                  {inspectDoc.similarity !== undefined ? `${inspectDoc.similarity}%` : 'N/A'}
+                </strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#64748B' }}>Match Reason:</span>
+                <span>{inspectDoc.duplicateReason}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#64748B' }}>Workflow Status:</span>
+                <StatusBadge status={inspectDoc.status} />
+              </div>
+              {inspectDoc.decision && (
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748B' }}>Level 1 Decision:</span>
+                  <strong>{inspectDoc.decision}</strong>
                 </div>
-                
-                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #F1F5F9', paddingBottom: 6 }}><span style={{ color: '#64748B' }}>Flag ID:</span> <strong style={{ color: '#0F172A' }}>{selectedDoc.flagId}</strong></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #F1F5F9', paddingBottom: 6 }}><span style={{ color: '#64748B' }}>Match Type:</span> <strong style={{ color: '#0F172A' }}>{selectedDoc.type}</strong></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #F1F5F9', paddingBottom: 6 }}><span style={{ color: '#64748B' }}>Uploaded Record:</span> <strong style={{ color: '#0F172A' }}>{selectedDoc.uploadedNumber}</strong></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #F1F5F9', paddingBottom: 6 }}><span style={{ color: '#64748B' }}>Existing Record:</span> <strong style={{ color: '#0F172A' }}>{selectedDoc.existingRecord}</strong></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #F1F5F9', paddingBottom: 6 }}><span style={{ color: '#64748B' }}>Client Name:</span> <strong style={{ color: '#0F172A' }}>{selectedDoc.clientName}</strong></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #F1F5F9', paddingBottom: 6 }}><span style={{ color: '#64748B' }}>Amount:</span> <strong style={{ color: '#0F172A' }}>₱{selectedDoc.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #F1F5F9', paddingBottom: 6 }}><span style={{ color: '#64748B' }}>AI Similarity:</span> <strong style={{ color: '#EF4444' }}>{selectedDoc.similarity}%</strong></div>
-              </div>
+              )}
+              {inspectDoc.decidedRemarks && (
+                <div style={{ background: '#F8FAFC', padding: '8px 12px', borderRadius: 6, marginTop: 4 }}>
+                  <span style={{ color: '#64748B', display: 'block', fontSize: '0.75rem', fontWeight: 600 }}>
+                    Accountant Remarks:
+                  </span>
+                  <span>{inspectDoc.decidedRemarks}</span>
+                </div>
+              )}
             </div>
-            
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
-              <button onClick={() => setSelectedDoc(null)} style={{ padding: '10px 20px', background: '#F1F5F9', color: '#475569', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}>Close</button>
+
+            <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end' }}>
+              <Button title="Close" variant="secondary" size="sm" onClick={() => setInspectDoc(null)} />
             </div>
           </div>
         </div>
       )}
-
-      <style>{`
-        .spin-icon { animation: spin 1s linear infinite; }
-        @keyframes spin { 100% { transform: rotate(360deg); } }
-      `}</style>
     </div>
   );
 };
-
-function pgBtn(disabled: boolean): React.CSSProperties {
-  return {
-    background: '#F1F5F9', border: 'none', borderRadius: '6px',
-    padding: '6px 10px', fontSize: '0.875rem',
-    cursor: disabled ? 'not-allowed' : 'pointer',
-    color: disabled ? '#CBD5E1' : '#475569',
-    opacity: disabled ? 0.5 : 1, minWidth: 34, fontWeight: 500,
-  };
-}
 
 export default FlaggedDuplicates;

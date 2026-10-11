@@ -21,7 +21,7 @@
 //   Fuel Surcharge  = FreightCost × 15%
 //   GRAND TOTAL     = Subtotal + VAT + FuelSurcharge
 
-import { BillingRate } from '../data/seed';
+import type { BillingRate } from '../types/entities';
 
 export interface FreightBreakdown {
   area: string;

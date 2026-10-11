@@ -2,20 +2,33 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Card } from '../components/Card';
 import { Button } from '../components/Buttons';
-import { TableContainer } from '../components/TableContainer';
-import { DataTable } from '../components/DataTable';
-import { StatusCard } from '../components/StatusCard';
+import { KpiCard } from '../components/shared/KpiCard';
 import Dropdown from '../components/Dropdown';
 import { useToast } from '../components/ToastContext';
 import { CalendarPicker } from '../components/FormModals';
 import { createPortal } from 'react-dom';
-
-import { useAppData } from '../context/AppDataContext';
+import { settlementsService } from '../services/settlementsService';
+import { cashFlowService } from '../services/cashFlowService';
+import { useQuery } from '../hooks/useQuery';
+import { Settlement } from '../types/entities';
+import { LoadingSpinner } from '../components/shared/LoadingSpinner';
+import { formatCurrency } from '../utils/format';
 
 const Settlements: React.FC = () => {
   const { user } = useAuth();
   const { toast } = useToast();
-  const { settlements, updateSettlement, addCashFlowRecord } = useAppData();
+
+  const {
+    data: fetchedSettlements,
+    isLoading: loading,
+    refetch,
+  } = useQuery('settlements:all', async () => {
+    const res = await settlementsService.list({ pageSize: 100 });
+    return res.items || [];
+  });
+
+  const [localSettlements, setLocalSettlements] = useState<Settlement[] | null>(null);
+  const settlements = localSettlements ?? fetchedSettlements ?? [];
 
   const [filterTab, setFilterTab] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -46,26 +59,25 @@ const Settlements: React.FC = () => {
     saveRecentSearch(searchQuery);
   };
 
-  const [selectedRecord, setSelectedRecord] = useState<any | null>(null);
+  const [selectedRecord, setSelectedRecord] = useState<Settlement | null>(null);
   const [decision, setDecision] = useState('');
   const [rejectionReason, setRejectionReason] = useState('');
   const [remarks, setRemarks] = useState('');
 
   // Stats
-  const pendingCount = settlements.filter(s => s.status === 'For validation').length;
-  const validatedCount = settlements.filter(s => s.status === 'Validated').length;
-  const rejectedCount = settlements.filter(s => s.status === 'Rejected').length;
-  const allCount = settlements.length;
+  const pendingCount = settlements.filter((s: Settlement) => s.status === 'For validation').length;
+  const validatedCount = settlements.filter((s: Settlement) => s.status === 'Validated').length;
+  const rejectedCount = settlements.filter((s: Settlement) => s.status === 'Rejected').length;
 
-  const pendingLeftoverAmount = settlements.filter(s => s.status === 'For validation' && s.type === 'Leftover return').reduce((sum, s) => sum + s.amount, 0);
-  const leftoverEnvelopesCount = settlements.filter(s => s.status === 'For validation' && s.type === 'Leftover return').length;
+  const pendingLeftoverAmount = settlements.filter((s: Settlement) => s.status === 'For validation' && s.type === 'Leftover return').reduce((sum: number, s: Settlement) => sum + s.amount, 0);
+  const leftoverEnvelopesCount = settlements.filter((s: Settlement) => s.status === 'For validation' && s.type === 'Leftover return').length;
   
-  const pendingReimbAmount = settlements.filter(s => s.status === 'For validation' && s.type === 'Reimbursement').reduce((sum, s) => sum + s.amount, 0);
-  const reimbRequestsCount = settlements.filter(s => s.status === 'For validation' && s.type === 'Reimbursement').length;
+  const pendingReimbAmount = settlements.filter((s: Settlement) => s.status === 'For validation' && s.type === 'Reimbursement').reduce((sum: number, s: Settlement) => sum + s.amount, 0);
+  const reimbRequestsCount = settlements.filter((s: Settlement) => s.status === 'For validation' && s.type === 'Reimbursement').length;
 
   // Filter Data
   const filteredData = useMemo(() => {
-    return settlements.filter(s => {
+    return settlements.filter((s: Settlement) => {
       // Tab filter
       if (filterTab === 'Pending' && s.status !== 'For validation') return false;
       if (filterTab === 'Validated' && s.status !== 'Validated') return false;
@@ -104,59 +116,68 @@ const Settlements: React.FC = () => {
     });
   }, [settlements, filterTab, searchQuery, typeFilter, dateFrom, dateTo]);
 
-  const handleReviewClick = (row: any) => {
+  const handleReviewClick = (row: Settlement) => {
     setSelectedRecord(row);
     setDecision('');
     setRejectionReason('');
     setRemarks('');
   };
 
-  const handleConfirmDecision = () => {
-    if (!decision) {
+  const handleConfirmDecision = async () => {
+    if (!decision || !selectedRecord) {
       toast.error('Please select a decision first.');
       return;
     }
     
-    updateSettlement(selectedRecord!.id, { status: decision === 'approve' ? 'Validated' : 'Rejected' });
-    
-    // Add to cash flow if validated
-    if (decision === 'approve') {
-      const isLeftover = selectedRecord?.type === 'Leftover return';
-      addCashFlowRecord({
-        id: `CFR-${Date.now()}`,
-        type: isLeftover ? 'Inflow' : 'Outflow',
-        amount: selectedRecord!.amount,
-        sourceReference: selectedRecord!.id,
-        date: new Date().toISOString(),
-        recordedBy: user?.employeeId || 'System'
-      });
+    try {
+      const newStatus = decision === 'approve' ? 'Validated' : 'Rejected';
+      await settlementsService.update(selectedRecord.id, { status: newStatus as any });
+      
+      // Add to cash flow if validated
+      if (decision === 'approve') {
+        const isLeftover = selectedRecord.type === 'Leftover return';
+        await cashFlowService.create({
+          type: isLeftover ? 'Inflow' : 'Outflow',
+          amount: selectedRecord.amount,
+          sourceReference: selectedRecord.id,
+          date: new Date().toISOString(),
+          recordedBy: user?.fullName || 'System',
+        });
+      }
+
+      setLocalSettlements(settlements.map((s: Settlement) => s.id === selectedRecord.id ? { ...s, status: newStatus as any } : s));
+      toast.success(`Settlement ${selectedRecord.id} has been ${newStatus.toLowerCase()}.`);
+      setSelectedRecord(null);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update settlement');
     }
-    
-    toast.success(`Settlement ${selectedRecord?.id} has been ${decision === 'approve' ? 'validated' : 'rejected'}.`);
-    setSelectedRecord(null);
   };
+
+  if (loading) {
+    return <LoadingSpinner text="Loading settlements..." />;
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       {/* Stats Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px' }}>
-        <StatusCard 
+        <KpiCard 
           label="Pending Validation" 
           value={pendingCount} 
           icon="ti-clock-hour-4" 
           variant="warning" 
           periodText="waiting for you" 
         />
-        <StatusCard 
+        <KpiCard 
           label="Leftover Cash" 
-          value={`₱${pendingLeftoverAmount.toLocaleString('en-PH', {minimumFractionDigits: 2})}`} 
+          value={formatCurrency(pendingLeftoverAmount)} 
           icon="ti-cash" 
           variant="success" 
           periodText={`${leftoverEnvelopesCount} envelopes recorded`} 
         />
-        <StatusCard 
+        <KpiCard 
           label="Reimbursements" 
-          value={`₱${pendingReimbAmount.toLocaleString('en-PH', {minimumFractionDigits: 2})}`} 
+          value={formatCurrency(pendingReimbAmount)} 
           icon="ti-receipt-refund" 
           variant="info" 
           periodText={`${reimbRequestsCount} requests`} 
@@ -208,7 +229,7 @@ const Settlements: React.FC = () => {
           </div>
           <select 
             value={filterTab} 
-            onChange={(e) => setFilterTab(e.target.value as any)}
+            onChange={(e) => setFilterTab(e.target.value)}
             style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #E2E8F0', fontSize: '13px', outline: 'none', background: '#F8FAFC', cursor: 'pointer', transition: 'border-color 0.2s, background-color 0.2s' }}
             onFocus={(e) => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.borderColor = '#3B82F6'; }}
             onBlur={(e) => { e.currentTarget.style.background = '#F8FAFC'; e.currentTarget.style.borderColor = '#E2E8F0'; }}
@@ -239,7 +260,7 @@ const Settlements: React.FC = () => {
                   onChange={setDateFrom}
                   placeholder="Start date..."
                   variant="filter"
-                  maxDate="2024-12-31"
+                  maxDate="2026-12-31"
                 />
               </div>
             </div>
@@ -253,7 +274,7 @@ const Settlements: React.FC = () => {
                   placeholder="End date..."
                   variant="filter"
                   minDate={dateFrom}
-                  maxDate="2024-12-31"
+                  maxDate="2026-12-31"
                 />
               </div>
             </div>
@@ -281,7 +302,7 @@ const Settlements: React.FC = () => {
                     No settlements found.
                   </td>
                 </tr>
-              ) : filteredData.map(row => (
+              ) : filteredData.map((row: Settlement) => (
                 <tr key={row.id} style={{ borderBottom: '1px solid #E2E8F0' }}>
                   <td style={{ ...tdStyle, fontWeight: 700 }}>{row.id}</td>
                   <td style={tdStyle}>
@@ -308,11 +329,11 @@ const Settlements: React.FC = () => {
                   </td>
                   <td style={tdStyle}>
                     <div style={{ fontWeight: 800, color: row.type === 'Leftover return' ? '#10B981' : '#3B82F6' }}>
-                      ₱{row.amount.toLocaleString('en-PH', {minimumFractionDigits: 2})}
+                      {formatCurrency(row.amount)}
                     </div>
                     {row.discrepancy && (
                       <div style={{ fontSize: '11px', color: '#EA580C', fontWeight: 600, marginTop: '2px' }}>
-                        Discrepancy ₱{row.discrepancy.toLocaleString('en-PH', {minimumFractionDigits: 2})}
+                        Discrepancy {formatCurrency(row.discrepancy)}
                       </div>
                     )}
                   </td>
@@ -368,18 +389,18 @@ const Settlements: React.FC = () => {
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '13px' }}>
                   <span style={{ color: '#475569', fontWeight: 600 }}>Cash advance</span>
-                  <span style={{ color: '#1E293B', fontWeight: 700 }}>₱{selectedRecord.cashAdvance.toLocaleString('en-PH', {minimumFractionDigits: 2})}</span>
+                  <span style={{ color: '#1E293B', fontWeight: 700 }}>{formatCurrency(selectedRecord.cashAdvance)}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px', fontSize: '13px' }}>
                   <span style={{ color: '#475569', fontWeight: 600 }}>Total expenses</span>
-                  <span style={{ color: '#1E293B', fontWeight: 700 }}>− ₱{selectedRecord.totalExpenses.toLocaleString('en-PH', {minimumFractionDigits: 2})}</span>
+                  <span style={{ color: '#1E293B', fontWeight: 700 }}>− {formatCurrency(selectedRecord.totalExpenses)}</span>
                 </div>
                 
                 <div style={{ height: '1px', background: '#E2E8F0', margin: '0 -16px 12px' }}></div>
                 
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px' }}>
                   <span style={{ color: '#0F172A', fontWeight: 800 }}>Expected {selectedRecord.type === 'Leftover return' ? 'leftover' : 'reimbursement'}</span>
-                  <span style={{ color: '#0F172A', fontWeight: 800 }}>₱{selectedRecord.amount.toLocaleString('en-PH', {minimumFractionDigits: 2})}</span>
+                  <span style={{ color: '#0F172A', fontWeight: 800 }}>{formatCurrency(selectedRecord.amount)}</span>
                 </div>
               </div>
 
@@ -392,7 +413,7 @@ const Settlements: React.FC = () => {
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', fontSize: '13px' }}>
                     <span style={{ color: '#475569', fontWeight: 600 }}>Cash counted by Accountant</span>
-                    <span style={{ color: '#1E293B', fontWeight: 700 }}>₱{selectedRecord.cashCounted?.toLocaleString('en-PH', {minimumFractionDigits: 2})}</span>
+                    <span style={{ color: '#1E293B', fontWeight: 700 }}>{formatCurrency(selectedRecord.cashCounted ?? 0)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
                     <span style={{ color: '#475569', fontWeight: 600 }}>Matches expected leftover</span>

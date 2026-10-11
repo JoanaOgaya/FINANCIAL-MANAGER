@@ -19,10 +19,10 @@ export const ToastBar: React.FC = () => {
           /* Toast Stack Container */
           .tb-toast-wrapper {
             position: fixed;
-            top: 85px;
+            bottom: 24px;
             right: 24px;
             display: flex;
-            flex-direction: column;
+            flex-direction: column-reverse;
             gap: 12px;
             z-index: 99999;
           }

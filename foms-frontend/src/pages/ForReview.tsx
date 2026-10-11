@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import DataTable from '../components/DataTable';
 import { useAuth } from '../context/AuthContext';
+import { http } from '../services/apiClient';
 
 interface ReviewRecord {
   id: string;
@@ -19,13 +20,6 @@ const truncate = (str: string, n: number) => (str && str.length > n) ? str.slice
 
 const ForReview: React.FC = () => {
   const { user } = useAuth();
-  const getToken = () => {
-    try {
-      const raw = sessionStorage.getItem('foms_session');
-      return raw ? JSON.parse(raw).accessToken : '';
-    } catch { return ''; }
-  };
-
   const [selectedRecord, setSelectedRecord] = useState<ReviewRecord | null>(null);
   const [data, setData] = useState<ReviewRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -33,62 +27,27 @@ const ForReview: React.FC = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/ai/collection/recommendations?status=all', {
-        headers: { 'Authorization': `Bearer ${getToken()}` }
-      });
-      if (res.ok) {
-        const json = await res.json();
-        const logged = Array.isArray(json) ? json.filter((r: any) => r.review_status && r.review_status !== 'Pending Review') : [];
-        if (logged.length > 0) {
-          const mapped = logged.map((r: any) => ({
-            id: String(r.id),
-            timestamp: r.reviewed_at ? new Date(r.reviewed_at).toLocaleString() : 'N/A',
-            invoiceNumber: r.priority?.normalized_invoice_number || r.priority?.invoice_number || 'N/A',
-            clientName: r.priority?.client_name || 'N/A',
-            balance: `₱${(r.priority?.outstanding_balance || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`,
-            decision: r.review_status || 'Pending',
-            loggedBy: r.reviewed_by || r.reviewer_username || 'System',
-            loggedByRole: r.reviewer_role || 'Finance Manager',
-            actionTaken: r.remarks || 'No action taken',
-            remarks: r.recommended_action || 'No remarks',
-          }));
-          setData(mapped);
-          setLoading(false);
-          return;
-        }
-      }
-    } catch (e) {
-      console.error(e);
+      const json: any = await http.get('/ai/collection/recommendations', { status: 'all' });
+      const rawList = Array.isArray(json) ? json : (json?.items || []);
+      const logged = rawList.filter((r: any) => r.review_status && r.review_status !== 'Pending Review');
+      const mapped = logged.map((r: any) => ({
+        id: String(r.id),
+        timestamp: r.reviewed_at ? new Date(r.reviewed_at).toLocaleString() : 'N/A',
+        invoiceNumber: r.priority?.normalized_invoice_number || r.priority?.invoice_number || 'N/A',
+        clientName: r.priority?.client_name || 'N/A',
+        balance: `₱${(r.priority?.outstanding_balance || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`,
+        decision: r.review_status || 'Pending',
+        loggedBy: r.reviewed_by || r.reviewer_username || 'System',
+        loggedByRole: r.reviewer_role || 'Finance Manager',
+        actionTaken: r.remarks || 'No action taken',
+        remarks: r.recommended_action || 'No remarks',
+      }));
+      setData(mapped);
+    } catch {
+      setData([]);
+    } finally {
+      setLoading(false);
     }
-    
-    // Fallback Mock Data
-    setData([
-      {
-        id: 'REV-001',
-        timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000).toLocaleString(),
-        invoiceNumber: 'INV-2023-045',
-        clientName: 'Alpha Logistics',
-        balance: '₱45,000.00',
-        decision: 'Accepted as Recommendation',
-        loggedBy: 'jdelacruz',
-        loggedByRole: 'Finance Manager',
-        actionTaken: 'Sent formal demand letter.',
-        remarks: 'Client promised to pay next week.',
-      },
-      {
-        id: 'REV-002',
-        timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000).toLocaleString(),
-        invoiceNumber: 'INV-2023-012',
-        clientName: 'Beta Trading',
-        balance: '₱12,500.00',
-        decision: 'Reviewed & Closed',
-        loggedBy: 'mclara',
-        loggedByRole: 'Accountant',
-        actionTaken: 'Payment received this morning.',
-        remarks: 'Already settled via bank transfer.',
-      }
-    ]);
-    setLoading(false);
   };
 
   useEffect(() => {

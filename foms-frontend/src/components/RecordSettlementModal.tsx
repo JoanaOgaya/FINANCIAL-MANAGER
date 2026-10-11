@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import Button from './Buttons';
 import { useToast } from './ToastContext';
-import { useAppData } from '../context/AppDataContext';
+import { settlementsService } from '../services/settlementsService';
 import { useAuth } from '../context/AuthContext';
 
 interface RecordSettlementModalProps {
@@ -11,8 +11,7 @@ interface RecordSettlementModalProps {
 }
 
 const RecordSettlementModal: React.FC<RecordSettlementModalProps> = ({ isOpen, onClose }) => {
-  const { toast } = useToast();
-  const { addSettlement } = useAppData();
+  const { triggerToast } = useToast();
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<'leftover' | 'overspending'>('leftover');
   
@@ -34,24 +33,23 @@ const RecordSettlementModal: React.FC<RecordSettlementModalProps> = ({ isOpen, o
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    addSettlement({
-      id: `CF-${Math.floor(100 + Math.random() * 900)}`,
+    settlementsService.create({
       type: activeTab === 'leftover' ? 'Leftover return' : 'Reimbursement',
       courierName: courierName || 'Unknown Courier',
       tripRef: tripRef || 'Unknown Trip',
-      submittedAt: new Date().toISOString(),
       amount: Math.abs(variance),
       status: 'For validation',
       cashAdvance: cashAdvanceGiven,
       totalExpenses: totalExpenses,
       envelopeNo: activeTab === 'leftover' ? envelopeNo : undefined,
       cashCounted: activeTab === 'leftover' ? cashCounted : undefined,
-      recordedBy: user?.fullName || 'Asst. Finance Manager',
-      recordedAt: new Date().toISOString()
+      recordedBy: user?.fullName || '',
+    }).then(() => {
+      triggerToast('success', 'Success', 'Settlement record sent to Finance Manager for validation.');
+      onClose();
+    }).catch((err) => {
+      triggerToast('error', 'Error', err.message || 'Failed to submit settlement.');
     });
-
-    toast.success('Settlement record sent to Finance Manager for validation.');
-    onClose();
   };
 
   const modalContent = (

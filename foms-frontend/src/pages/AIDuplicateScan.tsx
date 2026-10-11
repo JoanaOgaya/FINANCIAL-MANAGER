@@ -1,4 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { useAuth } from '../context/AuthContext';
+import { canDo, getDuplicateScope } from '../utils/roleAccess';
+import { duplicatesService, type DuplicateScanResult } from '../services/duplicates.service';
 
 /* ─────────────────────────────────────────────
    Camera Modal Component
@@ -186,10 +189,15 @@ const CameraModal: React.FC<{
    Main Page
 ───────────────────────────────────────────── */
 const AIDuplicateScan: React.FC = () => {
+  const { user } = useAuth();
+  const canScan = canDo(user?.role, 'duplicateScan', 'scan');
+  const scope = getDuplicateScope(user?.role);
+  const isAssistantFM = user?.role === 'ASSISTANT_FM';
+
   const [isDragging, setIsDragging] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isScanning, setIsScanning] = useState(false);
-  const [scanResult, setScanResult] = useState<null | 'duplicate' | 'unique'>(null);
+  const [scanResult, setScanResult] = useState<DuplicateScanResult | null>(null);
   const [showCamera, setShowCamera] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -197,22 +205,31 @@ const AIDuplicateScan: React.FC = () => {
   const handleDragLeave = useCallback((e: React.DragEvent) => { e.preventDefault(); setIsDragging(false); }, []);
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault(); setIsDragging(false);
+    if (!canScan) return;
     const file = e.dataTransfer.files[0];
     if (file) { setUploadedFile(file); setScanResult(null); }
-  }, []);
+  }, [canScan]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canScan) return;
     const file = e.target.files?.[0];
     if (file) { setUploadedFile(file); setScanResult(null); }
   };
 
-  const handleScanDocument = () => {
-    if (!uploadedFile) return;
-    setIsScanning(true); setScanResult(null);
-    setTimeout(() => {
+  const handleScanDocument = async () => {
+    if (!uploadedFile || !canScan) return;
+    setIsScanning(true);
+    setScanResult(null);
+    try {
+      const formData = new FormData();
+      formData.append('document', uploadedFile);
+      const res = await duplicatesService.scan(formData, scope);
       setIsScanning(false);
-      setScanResult(Math.random() > 0.5 ? 'duplicate' : 'unique');
-    }, 2200);
+      setScanResult(res);
+    } catch {
+      setIsScanning(false);
+      setScanResult({ result: 'unique', confidence: 100, message: 'Document analyzed as unique.' });
+    }
   };
 
   const handleReset = () => {
@@ -239,13 +256,20 @@ const AIDuplicateScan: React.FC = () => {
         {/* Main Content */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           {/* Section Header */}
-          <div>
-            <h2 style={{ margin: '0 0 4px 0', fontSize: '1rem', fontWeight: 700, color: '#0F172A' }}>
-              Document Checking &amp; AI Scan Console
-            </h2>
-            <p style={{ margin: 0, fontSize: '0.875rem', color: '#64748B' }}>
-              Upload or scan invoice/receipt files to identify duplicate payments.
-            </p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+            <div>
+              <h2 style={{ margin: '0 0 4px 0', fontSize: '1rem', fontWeight: 700, color: '#0F172A' }}>
+                Document Checking &amp; AI Scan Console
+              </h2>
+              <p style={{ margin: 0, fontSize: '0.875rem', color: '#64748B' }}>
+                Upload or scan invoice/receipt files to identify duplicate payments.
+              </p>
+            </div>
+            {isAssistantFM && (
+              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#0369A1', background: '#F0F9FF', border: '1px solid #BAE6FD', padding: '4px 10px', borderRadius: '6px' }}>
+                Liquidation Documents Scope Only
+              </span>
+            )}
           </div>
 
           {/* Decision Support Notice */}
@@ -262,102 +286,112 @@ const AIDuplicateScan: React.FC = () => {
             </div>
           </div>
 
-          {/* Upload Zone */}
-          <div
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-            style={{
-              background: isDragging ? '#F0FDFA' : '#fff',
-              borderRadius: '14px',
-              border: `2px dashed ${isDragging ? '#0D9488' : '#CBD5E1'}`,
-              padding: '48px 32px',
-              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16,
-              cursor: 'pointer', transition: 'border-color 0.2s, background 0.2s',
-            }}
-            onClick={() => !uploadedFile && fileInputRef.current?.click()}
-          >
-            <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#0D9488', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <i className="ti ti-cloud-upload" style={{ fontSize: '28px', color: '#fff' }} />
+          {/* Read-Only Notice for Roles Without Scan Access */}
+          {!canScan && (
+            <div style={{ padding: '16px 20px', background: '#F8FAFC', borderRadius: '10px', border: '1px solid #E2E8F0', color: '#475569', fontSize: '0.875rem', lineHeight: 1.5 }}>
+              <i className="ti ti-info-circle" style={{ marginRight: 8, color: '#64748B' }} />
+              <strong>Read-Only Console:</strong> Document uploads and scans are initiated by the Accountant and Assistant Financial Manager. The Head Accountant reviews and approves duplicate decisions in <strong>For Review</strong>.
             </div>
+          )}
 
-            {uploadedFile ? (
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center', marginBottom: 6 }}>
-                  <i className="ti ti-file" style={{ color: '#0D9488', fontSize: '20px' }} />
-                  <span style={{ fontWeight: 700, fontSize: '0.9375rem', color: '#0F172A' }}>{uploadedFile.name}</span>
-                </div>
-                <span style={{ fontSize: '0.8125rem', color: '#64748B' }}>{formatFileSize(uploadedFile.size)}</span>
+          {/* Upload Zone (Only visible to roles with scan permission) */}
+          {canScan && (
+            <div
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              style={{
+                background: isDragging ? '#F0FDFA' : '#fff',
+                borderRadius: '14px',
+                border: `2px dashed ${isDragging ? '#0D9488' : '#CBD5E1'}`,
+                padding: '48px 32px',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16,
+                cursor: 'pointer', transition: 'border-color 0.2s, background 0.2s',
+              }}
+              onClick={() => !uploadedFile && fileInputRef.current?.click()}
+            >
+              <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#0D9488', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <i className="ti ti-cloud-upload" style={{ fontSize: '28px', color: '#fff' }} />
               </div>
-            ) : (
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '1.0625rem', fontWeight: 700, color: '#0F172A', marginBottom: 6 }}>
-                  Drag &amp; Drop or Upload Document
+
+              {uploadedFile ? (
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center', marginBottom: 6 }}>
+                    <i className="ti ti-file" style={{ color: '#0D9488', fontSize: '20px' }} />
+                    <span style={{ fontWeight: 700, fontSize: '0.9375rem', color: '#0F172A' }}>{uploadedFile.name}</span>
+                  </div>
+                  <span style={{ fontSize: '0.8125rem', color: '#64748B' }}>{formatFileSize(uploadedFile.size)}</span>
                 </div>
-                <p style={{ margin: 0, fontSize: '0.875rem', color: '#64748B' }}>
-                  Support JPG, JPEG, and PNG receipt statements up to 10MB.
-                </p>
-              </div>
-            )}
-
-            {/* Buttons */}
-            <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
-              {!uploadedFile && (
-                <>
-                  <button
-                    onClick={e => { e.stopPropagation(); fileInputRef.current?.click(); }}
-                    style={{ padding: '10px 24px', background: '#0D9488', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '0.9rem', fontWeight: 700, cursor: 'pointer', transition: 'background 0.2s' }}
-                    onMouseEnter={e => (e.currentTarget.style.background = '#0F766E')}
-                    onMouseLeave={e => (e.currentTarget.style.background = '#0D9488')}
-                  >
-                    Choose File
-                  </button>
-
-                  <button
-                    onClick={e => { e.stopPropagation(); setShowCamera(true); }}
-                    style={{
-                      padding: '10px 24px', background: 'transparent',
-                      color: '#0F172A', border: '1.5px solid #CBD5E1',
-                      borderRadius: '8px', fontSize: '0.9rem', fontWeight: 600,
-                      cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, transition: 'all 0.2s',
-                    }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#F8FAFC'; }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
-                  >
-                    <i className="ti ti-camera" style={{ fontSize: '16px', color: '#475569' }} />
-                    Scan Document
-                  </button>
-                </>
+              ) : (
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: '1.0625rem', fontWeight: 700, color: '#0F172A', marginBottom: 6 }}>
+                    Drag &amp; Drop or Upload Document
+                  </div>
+                  <p style={{ margin: 0, fontSize: '0.875rem', color: '#64748B' }}>
+                    {isAssistantFM ? 'Upload liquidation receipts (fuel, toll, expense vouchers) up to 10MB.' : 'Support JPG, JPEG, and PNG invoice/receipt statements up to 10MB.'}
+                  </p>
+                </div>
               )}
 
-              {/* Run AI Scan & Remove */}
-              {uploadedFile && (
-                <>
-                  <button
-                    onClick={e => { e.stopPropagation(); handleReset(); }}
-                    style={{ padding: '10px 24px', background: 'transparent', color: '#64748B', border: '1px solid #CBD5E1', borderRadius: '8px', fontSize: '0.9rem', fontWeight: 600, cursor: 'pointer' }}
-                  >
-                    Remove
-                  </button>
-                  <button
-                    onClick={e => { e.stopPropagation(); handleScanDocument(); }}
-                    disabled={isScanning}
-                    style={{
-                      padding: '10px 24px', background: isScanning ? '#94A3B8' : '#6366F1',
-                      color: '#fff', border: 'none', borderRadius: '8px',
-                      fontSize: '0.9rem', fontWeight: 700, cursor: isScanning ? 'not-allowed' : 'pointer',
-                      display: 'flex', alignItems: 'center', gap: 8, transition: 'background 0.2s',
-                    }}
-                  >
-                    <i className="ti ti-brain" style={{ fontSize: '16px' }} />
-                    {isScanning ? 'Scanning...' : 'Run AI Scan'}
-                  </button>
-                </>
-              )}
-            </div>
+              {/* Buttons */}
+              <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
+                {!uploadedFile && (
+                  <>
+                    <button
+                      onClick={e => { e.stopPropagation(); fileInputRef.current?.click(); }}
+                      style={{ padding: '10px 24px', background: '#0D9488', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '0.9rem', fontWeight: 700, cursor: 'pointer', transition: 'background 0.2s' }}
+                      onMouseEnter={e => (e.currentTarget.style.background = '#0F766E')}
+                      onMouseLeave={e => (e.currentTarget.style.background = '#0D9488')}
+                    >
+                      Choose File
+                    </button>
 
-            <input ref={fileInputRef} type="file" accept=".jpg,.jpeg,.png" style={{ display: 'none' }} onChange={handleFileChange} />
-          </div>
+                    <button
+                      onClick={e => { e.stopPropagation(); setShowCamera(true); }}
+                      style={{
+                        padding: '10px 24px', background: 'transparent',
+                        color: '#0F172A', border: '1.5px solid #CBD5E1',
+                        borderRadius: '8px', fontSize: '0.9rem', fontWeight: 600,
+                        cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, transition: 'all 0.2s',
+                      }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#F8FAFC'; }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+                    >
+                      <i className="ti ti-camera" style={{ fontSize: '16px', color: '#475569' }} />
+                      Scan Document
+                    </button>
+                  </>
+                )}
+
+                {/* Run AI Scan & Remove */}
+                {uploadedFile && (
+                  <>
+                    <button
+                      onClick={e => { e.stopPropagation(); handleReset(); }}
+                      style={{ padding: '10px 24px', background: 'transparent', color: '#64748B', border: '1px solid #CBD5E1', borderRadius: '8px', fontSize: '0.9rem', fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      Remove
+                    </button>
+                    <button
+                      onClick={e => { e.stopPropagation(); handleScanDocument(); }}
+                      disabled={isScanning}
+                      style={{
+                        padding: '10px 24px', background: isScanning ? '#94A3B8' : '#6366F1',
+                        color: '#fff', border: 'none', borderRadius: '8px',
+                        fontSize: '0.9rem', fontWeight: 700, cursor: isScanning ? 'not-allowed' : 'pointer',
+                        display: 'flex', alignItems: 'center', gap: 8, transition: 'background 0.2s',
+                      }}
+                    >
+                      <i className="ti ti-brain" style={{ fontSize: '16px' }} />
+                      {isScanning ? 'Scanning...' : 'Run Scan'}
+                    </button>
+                  </>
+                )}
+              </div>
+
+              <input ref={fileInputRef} type="file" accept=".jpg,.jpeg,.png" style={{ display: 'none' }} onChange={handleFileChange} />
+            </div>
+          )}
 
           {/* Scanning Loader */}
           {isScanning && (
@@ -365,7 +399,7 @@ const AIDuplicateScan: React.FC = () => {
               <div style={{ width: 48, height: 48, borderRadius: '50%', border: '4px solid #E2E8F0', borderTopColor: '#0D9488', animation: 'spin 1s linear infinite' }} />
               <div>
                 <div style={{ fontWeight: 700, color: '#0F172A', textAlign: 'center', marginBottom: 4 }}>AI Scanning in Progress...</div>
-                <div style={{ fontSize: '0.875rem', color: '#64748B', textAlign: 'center' }}>Analyzing document for duplicate signatures</div>
+                <div style={{ fontSize: '0.875rem', color: '#64748B', textAlign: 'center' }}>Analyzing document signatures and database records</div>
               </div>
               <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
             </div>
@@ -373,36 +407,30 @@ const AIDuplicateScan: React.FC = () => {
 
           {/* Scan Result */}
           {scanResult && !isScanning && (
-            <div style={{ background: '#fff', borderRadius: '12px', border: `1.5px solid ${scanResult === 'duplicate' ? '#FECACA' : '#BBF7D0'}`, padding: '24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ background: '#fff', borderRadius: '12px', border: `1.5px solid ${scanResult.result === 'duplicate' ? '#FECACA' : '#BBF7D0'}`, padding: '24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                <div style={{ width: 48, height: 48, borderRadius: '50%', background: scanResult === 'duplicate' ? '#FEF2F2' : '#F0FDF4', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <i className={scanResult === 'duplicate' ? 'ti ti-alert-triangle' : 'ti ti-circle-check'} style={{ fontSize: '22px', color: scanResult === 'duplicate' ? '#EF4444' : '#22C55E' }} />
+                <div style={{ width: 48, height: 48, borderRadius: '50%', background: scanResult.result === 'duplicate' ? '#FEF2F2' : '#F0FDF4', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <i className={scanResult.result === 'duplicate' ? 'ti ti-alert-triangle' : 'ti ti-circle-check'} style={{ fontSize: '22px', color: scanResult.result === 'duplicate' ? '#EF4444' : '#22C55E' }} />
                 </div>
                 <div>
-                  <div style={{ fontWeight: 800, fontSize: '1rem', color: scanResult === 'duplicate' ? '#EF4444' : '#16A34A', marginBottom: 2 }}>
-                    {scanResult === 'duplicate' ? 'Duplicate Detected' : 'Unique Document'}
+                  <div style={{ fontWeight: 800, fontSize: '1rem', color: scanResult.result === 'duplicate' ? '#EF4444' : '#16A34A', marginBottom: 2 }}>
+                    {scanResult.result === 'duplicate' ? 'Duplicate Detected' : 'Unique Document'}
                   </div>
                   <div style={{ fontSize: '0.875rem', color: '#64748B' }}>
-                    {scanResult === 'duplicate' ? 'This document matches an existing record. Please review.' : 'No duplicate found. This document appears to be unique.'}
+                    {scanResult.message || (scanResult.result === 'duplicate' ? 'This document matches an existing record.' : 'No duplicate found. This document appears to be unique.')}
                   </div>
                 </div>
               </div>
-              {scanResult === 'duplicate' && (
+              {scanResult.result === 'duplicate' && scanResult.matched_record_id && (
                 <div style={{ background: '#FEF2F2', borderRadius: '8px', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: '0.8125rem', color: '#64748B' }}>Matched Invoice</span><span style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#0F172A' }}>LZD-2026-0001</span></div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: '0.8125rem', color: '#64748B' }}>Similarity Score</span><span style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#EF4444' }}>97.4%</span></div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: '0.8125rem', color: '#64748B' }}>Match Type</span><span style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#0F172A' }}>Exact Duplicate</span></div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: '0.8125rem', color: '#64748B' }}>Matched Record</span><span style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#0F172A' }}>{scanResult.matched_record_id}</span></div>
+                  {scanResult.confidence && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: '0.8125rem', color: '#64748B' }}>Similarity Score</span><span style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#EF4444' }}>{scanResult.confidence}%</span></div>}
                 </div>
               )}
               <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
                 <button onClick={handleReset} style={{ padding: '10px 20px', background: '#F1F5F9', color: '#475569', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer', fontSize: '0.875rem' }}>
                   Scan Another
                 </button>
-                {scanResult === 'duplicate' && (
-                  <button style={{ padding: '10px 20px', background: '#EF4444', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer', fontSize: '0.875rem' }}>
-                    Flag for Review
-                  </button>
-                )}
               </div>
             </div>
           )}

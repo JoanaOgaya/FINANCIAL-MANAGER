@@ -1,6 +1,9 @@
 import React from 'react';
-import { Invoice, SEEDED_RATES } from '../data/seed';
-import { useAppData } from '../context/AppDataContext';
+import type { Invoice } from '../types/entities';
+import { useQuery } from '../hooks/useQuery';
+import { clientsService } from '../services/clientsService';
+import { waybillsService } from '../services/waybillsService';
+import { ratesService } from '../services/ratesService';
 import { computeFreightCost } from '../utils/billing';
 
 interface WaybillLineItem {
@@ -16,7 +19,12 @@ interface WaybillLineItem {
 }
 
 export const InvoiceDocument: React.FC<{ invoice: Invoice; compact?: boolean }> = ({ invoice, compact = false }) => {
-  const { clients, waybills: allWaybills, billingRates } = useAppData();
+  const { data: clientsData } = useQuery('clients', () => clientsService.list({ pageSize: 100 }));
+  const { data: waybillsData } = useQuery('waybills', () => waybillsService.list({ pageSize: 100 }));
+  const { data: ratesData } = useQuery('billingRates', () => ratesService.list({ pageSize: 100 }));
+  const clients = clientsData?.items || [];
+  const allWaybills = waybillsData?.items || [];
+  const billingRates = ratesData?.items || [];
 
   const client = clients.find(c => c.id === invoice.clientId);
   const rawWaybills = (invoice.waybillIds || []).map(id => allWaybills.find(w => w.id === id)).filter(Boolean) as any[];

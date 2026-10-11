@@ -1,39 +1,29 @@
 /**
- * ProtectedRoute — FR-004
- * Blocks unauthenticated users from accessing restricted modules.
- * Redirects to /login if not authenticated.
+ * Route guards.
+ *  - ProtectedRoute: unauthenticated -> /login.
+ *  - RoleGuard: authenticated but role not allowed for the module -> 403 page.
+ * Access rules come exclusively from utils/roleAccess.
  */
-
-import { Navigate } from 'react-router-dom';
+import React from 'react';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import type { UserRole } from '../types/auth';
+import { ForbiddenPage } from './shared/ForbiddenPage';
+import { getModule, type ModuleKey } from '../utils/roleAccess';
 
-interface ProtectedRouteProps {
-  children: React.ReactNode;
-  allowedRoles?: UserRole[];
-}
+export function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { user, isLoading } = useAuth();
+  const location = useLocation();
 
-export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
-  const { user, isAuthenticated, isLoading } = useAuth();
-
-  // While checking session, render nothing (prevents flash)
   if (isLoading) return null;
-
-  if (!isAuthenticated || !user) {
-    return <Navigate to="/login" replace />;
+  if (!user) {
+    const isLoggedOut = typeof window !== 'undefined' && sessionStorage.getItem('loggedOut') === 'true';
+    return <Navigate to="/login" replace state={isLoggedOut ? null : { from: location.pathname + (location.search || '') }} />;
   }
-
-  // FR-004, FR-005: Role-based access check
-  if (allowedRoles && allowedRoles.length > 0) {
-    if (!allowedRoles.includes(user.role)) {
-      // User is authenticated but unauthorized for this specific module
-      // Redirect them back to their own dashboard
-      return <Navigate to="/dashboard" replace />;
-    }
-  }
-
   return <>{children}</>;
 }
 
-export default ProtectedRoute;
-
+export function RoleGuard({ module, children }: { module: ModuleKey; children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!user || !getModule(module).roles[user.role]) return <ForbiddenPage />;
+  return <>{children}</>;
+}

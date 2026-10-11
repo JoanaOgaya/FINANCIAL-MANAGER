@@ -53,11 +53,24 @@ export default defineConfig(({ mode }) => {
       },
     ],
     server: {
-      port: 4173,
+      port: 5173,
+      strictPort: true,
       host: true,
       proxy: {
         '/api': {
-          target: 'http://localhost:5007',
+          target: env.VITE_API_URL || 'http://localhost:5007',
+          changeOrigin: true,
+          secure: false,
+        },
+      },
+    },
+    preview: {
+      port: 4173,
+      strictPort: true,
+      host: true,
+      proxy: {
+        '/api': {
+          target: env.VITE_API_URL || 'http://localhost:5007',
           changeOrigin: true,
           secure: false,
         },

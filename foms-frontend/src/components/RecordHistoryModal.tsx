@@ -1,7 +1,8 @@
 import React, { useMemo } from 'react';
 import { DataTable } from './DataTable';
-import { useAppData } from '../context/AppDataContext';
-import { AuditLog } from '../data/seed';
+import { useQuery } from '../hooks/useQuery';
+import { auditLogsService } from '../services/auditLogsService';
+import type { AuditLog } from '../types/entities';
 import './FormModals.css';
 
 interface RecordHistoryModalProps {
@@ -19,7 +20,8 @@ export const RecordHistoryModal: React.FC<RecordHistoryModalProps> = ({
   recordType,
   title
 }) => {
-  const { auditLogs } = useAppData();
+  const { data } = useQuery(`auditLogs:${recordId}`, () => auditLogsService.list({ pageSize: 100 }), { enabled: isOpen });
+  const auditLogs = data?.items || [];
 
   // Filter logs for this specific record. We can loosely match recordId.
   const historyLogs = useMemo(() => {

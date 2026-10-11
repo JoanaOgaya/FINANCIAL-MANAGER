@@ -28,6 +28,8 @@ export interface ToastContextValue {
 
 const ToastContext = createContext<ToastContextValue | undefined>(undefined);
 
+let toastSeq = 0;
+
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const queueRef = useRef<Toast[]>([]);
@@ -53,8 +55,8 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   const startTimer = useCallback((id: number, type: ToastType, duration?: number) => {
-    // All toasts now disappear after 5 seconds (5000ms) by default
-    const finalDuration = duration !== undefined ? duration : 5000;
+    // Auto-dismiss in 4 seconds (4000ms) by default
+    const finalDuration = duration !== undefined ? (duration <= 10 ? duration * 1000 : duration) : 4000;
 
     if (finalDuration > 0) {
       setTimeout(() => {
@@ -72,7 +74,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       onAction?: () => void,
       duration?: number
     ) => {
-      const id = Date.now() + Math.random();
+      const id = ++toastSeq;
 
       const newToast: Toast = {
         id,

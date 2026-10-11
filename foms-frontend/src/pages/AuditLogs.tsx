@@ -1,5 +1,7 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { useAppData } from '../context/AppDataContext';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { useQuery } from '../hooks/useQuery';
+import { auditLogsService } from '../services/auditLogsService';
+import type { AuditLog } from '../types/entities';
 import { CalendarPicker } from '../components/FormModals';
 import '../components/FormModals.css';
 
@@ -92,7 +94,8 @@ const RowMenu: React.FC<{ onView: () => void }> = ({ onView }) => {
 
 /* ─── Main Page ─── */
 export const AuditLogs: React.FC = () => {
-  const { auditLogs } = useAppData();
+  const { data: auditData } = useQuery('audit:logs', () => auditLogsService.list({ pageSize: 200 }));
+  const auditLogs: AuditLog[] = auditData?.items || [];
 
   const [search, setSearch]         = useState('');
   const [showRecent, setShowRecent] = useState(false);
@@ -129,28 +132,28 @@ export const AuditLogs: React.FC = () => {
     saveRecentSearch(search);
   };
 
-  const uniqueActions = useMemo(() => Array.from(new Set(auditLogs.map(l => l.action))).sort(), [auditLogs]);
-  const uniqueUsers   = useMemo(() => Array.from(new Set(auditLogs.map(l => l.userFullName))).sort(), [auditLogs]);
+  const uniqueActions: string[] = useMemo(() => Array.from(new Set(auditLogs.map((l: AuditLog) => l.action))).sort(), [auditLogs]);
+  const uniqueUsers: string[]   = useMemo(() => Array.from(new Set(auditLogs.map((l: AuditLog) => l.userFullName))).sort(), [auditLogs]);
 
   const filtered = useMemo(() => {
     let list = [...auditLogs];
     if (search) {
       const q = search.toLowerCase();
-      list = list.filter(l =>
+      list = list.filter((l: AuditLog) =>
         l.userFullName.toLowerCase().includes(q) ||
         l.userRole.toLowerCase().includes(q) ||
         l.action.toLowerCase().includes(q) ||
         (l.details || '').toLowerCase().includes(q),
       );
     }
-    if (eventType)    list = list.filter(l => l.action === eventType);
-    if (userFilter)   list = list.filter(l => l.userFullName === userFilter);
-    if (resultFilter === 'success') list = list.filter(l => isSuccess(l.action));
-    if (resultFilter === 'failed')  list = list.filter(l => !isSuccess(l.action));
-    if (dateFrom)     list = list.filter(l => new Date(l.timestamp) >= new Date(dateFrom));
+    if (eventType)    list = list.filter((l: AuditLog) => l.action === eventType);
+    if (userFilter)   list = list.filter((l: AuditLog) => l.userFullName === userFilter);
+    if (resultFilter === 'success') list = list.filter((l: AuditLog) => isSuccess(l.action));
+    if (resultFilter === 'failed')  list = list.filter((l: AuditLog) => !isSuccess(l.action));
+    if (dateFrom)     list = list.filter((l: AuditLog) => new Date(l.timestamp) >= new Date(dateFrom));
     if (dateTo) {
       const end = new Date(dateTo); end.setHours(23, 59, 59, 999);
-      list = list.filter(l => new Date(l.timestamp) <= end);
+      list = list.filter((l: AuditLog) => new Date(l.timestamp) <= end);
     }
     list.sort((a: any, b: any) => {
       let cmp = 0;
@@ -165,10 +168,10 @@ export const AuditLogs: React.FC = () => {
   const paged = filtered.slice((page - 1) * rowsPerPage, page * rowsPerPage);
 
   const totalEvents = auditLogs.length;
-  const loginEvents = auditLogs.filter(l => l.action === 'USER_LOGIN').length;
-  const dupChecks   = auditLogs.filter(l => l.action.includes('DUPLICATE') || l.action.includes('DOCUMENT')).length;
-  const collEvents  = auditLogs.filter(l => l.action.includes('COLLECTION') || l.action.includes('PAYMENT')).length;
-  const failedAuth  = auditLogs.filter(l => l.action.includes('FAILED') || l.action.includes('REJECTED')).length;
+  const loginEvents = auditLogs.filter((l: AuditLog) => l.action === 'USER_LOGIN').length;
+  const dupChecks   = auditLogs.filter((l: AuditLog) => l.action.includes('DUPLICATE') || l.action.includes('DOCUMENT')).length;
+  const collEvents  = auditLogs.filter((l: AuditLog) => l.action.includes('COLLECTION') || l.action.includes('PAYMENT')).length;
+  const failedAuth  = auditLogs.filter((l: AuditLog) => l.action.includes('FAILED') || l.action.includes('REJECTED')).length;
 
   const toggleSort = (key: string) => {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -261,7 +264,7 @@ export const AuditLogs: React.FC = () => {
             <select value={eventType} onChange={e => setEventType(e.target.value)}
               style={{ ...selStyle, paddingRight: 28, minWidth: 150 }}>
               <option value="">All Event Types</option>
-              {uniqueActions.map(a => <option key={a} value={a}>{a.replace(/_/g, ' ')}</option>)}
+              {uniqueActions.map((a: string) => <option key={a} value={a}>{a.replace(/_/g, ' ')}</option>)}
             </select>
             <i className="ti ti-chevron-down" style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', color: '#94A3B8', fontSize: 12, pointerEvents: 'none' }} />
           </div>
@@ -280,7 +283,7 @@ export const AuditLogs: React.FC = () => {
           <div style={{ position: 'relative' }}>
             <select value={userFilter} onChange={e => setUserFilter(e.target.value)} style={{ ...selStyle, minWidth: 130 }}>
               <option value="">All Users</option>
-              {uniqueUsers.map(u => <option key={u} value={u}>{u}</option>)}
+              {uniqueUsers.map((u: string) => <option key={u} value={u}>{u}</option>)}
             </select>
             <i className="ti ti-chevron-down" style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', color: '#94A3B8', fontSize: 12, pointerEvents: 'none' }} />
           </div>

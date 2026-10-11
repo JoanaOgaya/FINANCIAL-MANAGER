@@ -1,52 +1,44 @@
 import React, { useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { ROLE_LABELS } from '../data/seed';
 import { Card } from '../components/Card';
-import { relativeTime } from '../components/RecentActivity';
+import { useQuery } from '../hooks/useQuery';
+import { auditLogsService } from '../services/auditLogsService';
+import type { AuditLog } from '../types/entities';
+import { formatRelative } from '../utils/format';
+
+const ROLE_LABEL_MAP: Record<string, string> = {
+  FINANCIAL_MANAGER: 'Financial Manager',
+  HEAD_ACCOUNTANT: 'Head Accountant',
+  ACCOUNTANT: 'Accountant',
+  ASSISTANT_FM: 'Assistant Financial Manager',
+};
+const getRoleLabel = (r?: string) => (r && ROLE_LABEL_MAP[r]) || r || 'User';
 
 export const ProfilePage: React.FC = () => {
   const { user } = useAuth();
+  const { data: auditData } = useQuery(
+    `profile:audit:${user?.employeeId}`,
+    () => auditLogsService.list({ pageSize: 50 }),
+    { enabled: !!user }
+  );
+
+  const loginHistoryFeed = useMemo(() => {
+    if (!user) return [];
+    const logs = auditData?.items || [];
+    const loginLogs = logs.filter((log: AuditLog) => log.userId === user.employeeId && log.action === 'USER_LOGIN');
+
+    return loginLogs.map((log: AuditLog, idx: number) => ({
+      id: log.id,
+      timeAgo: idx === 0 ? 'Just now' : formatRelative(log.timestamp),
+      deviceInfo: log.ipAddress ? `IP: ${log.ipAddress}` : 'Web Session',
+      isCurrent: idx === 0,
+    }));
+  }, [user, auditData]);
 
   if (!user) return null;
 
-  const loginHistoryFeed = useMemo(() => {
-    if (!user.loginHistory) return [];
-
-    const devices = [
-      'MacBook Pro / 192.168.1.45',
-      'iPhone 15 Pro / 112.44.21.9',
-      'Windows Desktop / 192.168.1.12',
-      'iPad Pro / 10.0.0.15'
-    ];
-
-    return user.loginHistory.map((isoString, index) => {
-      const d = new Date(isoString);
-      const hash = Array.from(isoString).reduce((acc, char) => acc + char.charCodeAt(0), 0);
-      const deviceName = devices[hash % devices.length];
-      const relTime = relativeTime(isoString);
-
-      return {
-        id: index.toString(),
-        rawDate: d,
-        timeAgo: relTime,
-        deviceInfo: deviceName,
-        isCurrent: false
-      };
-    }).sort((a, b) => b.rawDate.getTime() - a.rawDate.getTime()).map((item, idx) => ({
-      ...item,
-      isCurrent: idx === 0,
-      timeAgo: idx === 0 ? 'Just now' : item.timeAgo
-    }));
-  }, [user.loginHistory]);
-
-  const email = `${user.fullName.toLowerCase().replace(/\s+/g, '.')}@foms.global`;
+  const email = user.email || `${user.fullName.toLowerCase().replace(/\s+/g, '.')}@foms.global`;
   const initials = user.fullName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
-
-  const getDeviceIcon = (deviceInfo: string) => {
-    if (deviceInfo.includes('iPhone') || deviceInfo.includes('iPad')) return 'ti-device-mobile';
-    if (deviceInfo.includes('Windows')) return 'ti-device-desktop';
-    return 'ti-device-laptop';
-  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -60,7 +52,7 @@ export const ProfilePage: React.FC = () => {
             <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: '#0F172A' }}>{user.fullName}</h2>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#FAF5FF', color: '#9333EA', padding: '4px 10px', borderRadius: '100px', fontSize: '0.75rem', fontWeight: 600, width: 'fit-content' }}>
               <i className="ti ti-check" style={{ fontSize: '0.85rem' }} />
-              {ROLE_LABELS[user.role] || user.role}
+              {getRoleLabel(user.role)}
             </div>
           </div>
         </div>
@@ -73,7 +65,7 @@ export const ProfilePage: React.FC = () => {
               </div>
               <div>
                 <p style={{ margin: '0 0 8px', fontSize: '0.7rem', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>ASSIGNED ROLE</p>
-                <p style={{ margin: 0, fontSize: '0.95rem', color: '#0F172A', fontWeight: 500 }}>{ROLE_LABELS[user.role] || user.role}</p>
+                <p style={{ margin: 0, fontSize: '0.95rem', color: '#0F172A', fontWeight: 500 }}>{getRoleLabel(user.role)}</p>
               </div>
             </div>
             <div>
@@ -105,7 +97,7 @@ export const ProfilePage: React.FC = () => {
             loginHistoryFeed.map((log, idx) => (
               <div key={log.id} style={{ display: 'flex', gap: 16, alignItems: 'center', padding: '16px 32px', borderBottom: idx < loginHistoryFeed.length - 1 ? '1px solid #F1F5F9' : 'none', background: '#FFF' }}>
                 <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: log.isCurrent ? '#10B981' : '#CBD5E1', flexShrink: 0 }} />
-                <i className={`ti ${getDeviceIcon(log.deviceInfo)}`} style={{ color: '#94A3B8', fontSize: '1.1rem' }} />
+                <i className="ti ti-device-desktop" style={{ color: '#94A3B8', fontSize: '1.1rem' }} />
                 <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <span style={{ fontSize: '0.85rem', color: '#94A3B8' }}>{log.timeAgo} · </span>
                   <span style={{ fontSize: '0.85rem', color: '#334155', fontWeight: 600 }}>{log.deviceInfo}</span>
@@ -118,11 +110,6 @@ export const ProfilePage: React.FC = () => {
               </div>
             ))
           )}
-        </div>
-        <div style={{ padding: '16px', borderTop: '1px solid #F1F5F9', textAlign: 'center', background: '#FFF', borderBottomLeftRadius: 12, borderBottomRightRadius: 12 }}>
-          <button style={{ background: 'none', border: 'none', color: '#0D9488', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' }}>
-            View All Security Logs
-          </button>
         </div>
       </Card>
     </div>

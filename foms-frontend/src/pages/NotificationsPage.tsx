@@ -1,38 +1,35 @@
 import React, { useState, useMemo, useCallback } from "react";
-import { Bell, AlertTriangle, CheckCircle2, Info, Settings } from "lucide-react";
+import { Bell } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { StatusBadge } from "../components/StatusBadge";
-import ConfirmModal from "../components/ConfirmModal";
+import { StatusBadge } from "../components/shared/StatusBadge";
+import ConfirmModal from "../components/shared/ConfirmModal";
 import { Button } from "../components/Buttons";
-import { useNotifications } from "../context/NotificationContext";
+import { useNotifications, NotificationItem } from "../hooks/useNotifications";
 import "./NotificationsPage.css";
 
 export const NotificationsPage: React.FC = () => {
   const navigate = useNavigate();
   const { notifications, unreadCount, markAllAsRead, clearAll, toggleReadStatus } = useNotifications();
   const [activeTab, setActiveTab] = useState("all");
-  const [selectedId, setSelectedId] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
 
-  const selected = useMemo(() => notifications.find((n) => n.id === selectedId) ?? null, [notifications, selectedId]);
   const filtered = useMemo(() => {
     if (activeTab === "all") return notifications;
-    if (activeTab === "read") return notifications.filter((n) => n.read);
-    return notifications.filter((n) => n.type === activeTab && !n.read);
+    if (activeTab === "read") return notifications.filter((n: NotificationItem) => n.read);
+    return notifications.filter((n: NotificationItem) => n.type === activeTab && !n.read);
   }, [notifications, activeTab]);
-
 
   const tabs = useMemo(() => [
     { key: "all", label: "All" },
-    { key: "alert", label: "Alerts", count: notifications.filter((n) => n.type === "alert" && !n.read).length },
-    { key: "success", label: "Success", count: notifications.filter((n) => n.type === "success" && !n.read).length },
-    { key: "system", label: "System", count: notifications.filter((n) => n.type === "system" && !n.read).length },
+    { key: "alert", label: "Alerts", count: notifications.filter((n: NotificationItem) => n.type === "alert" && !n.read).length },
+    { key: "success", label: "Success", count: notifications.filter((n: NotificationItem) => n.type === "success" && !n.read).length },
+    { key: "system", label: "System", count: notifications.filter((n: NotificationItem) => n.type === "system" && !n.read).length },
     { key: "read", label: "Read" },
   ], [notifications]);
 
   const grouped = useMemo(() => {
-    return filtered.reduce((acc: any, n: any) => {
+    return filtered.reduce((acc: Record<string, NotificationItem[]>, n: NotificationItem) => {
       const dateKey = n.isToday ? 'TODAY' : 'EARLIER';
       if (!acc[dateKey]) acc[dateKey] = [];
       acc[dateKey].push(n);
@@ -42,18 +39,9 @@ export const NotificationsPage: React.FC = () => {
 
   const handleClearConfirm = useCallback(() => {
     clearAll();
-    setSelectedId("");
+    setSelectedIds([]);
     setShowClearConfirm(false);
   }, [clearAll]);
-
-  const TypeIcon = ({ type, size = 18 }: any) => {
-    switch (type) {
-      case "alert": return <AlertTriangle size={size} />;
-      case "success": return <CheckCircle2 size={size} />;
-      case "system": return <Settings size={size} />;
-      default: return <Info size={size} />;
-    }
-  };
 
   return (
     <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', padding: '24px', minHeight: 'calc(100vh - 120px)' }}>
@@ -89,15 +77,14 @@ export const NotificationsPage: React.FC = () => {
                 <div style={{ marginTop: '12px', fontWeight: 600, color: '#64748B' }}>No Notifications</div>
               </div>
             ) : (
-              Object.entries(grouped).map(([date, items]: any) => (
+              Object.entries(grouped).map(([date, items]) => (
                 <div key={date}>
                   <div className="notif-date-header">{date}</div>
-                  {items.map((n: any) => (
+                  {items.map((n: NotificationItem) => (
                     <div
                       key={n.id}
-                      className={`notif-item ${selectedId === n.id ? "selected" : ""} ${!n.read ? "unread" : ""}`}
+                      className={`notif-item ${selectedIds.includes(n.id) ? "selected" : ""} ${!n.read ? "unread" : ""}`}
                       onClick={() => {
-                        setSelectedId(n.id);
                         if (!n.read) toggleReadStatus(n.id);
                         if (n.link) navigate(n.link);
                       }}

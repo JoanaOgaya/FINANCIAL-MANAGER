@@ -1,10 +1,18 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/ToastContext';
-import { useAppData } from '../context/AppDataContext';
-import { StatusCard } from '../components/StatusCard';
+import { useQuery } from '../hooks/useQuery';
+import { arService } from '../services/arService';
+import { http } from '../services/apiClient';
+import { collectionService } from '../services/ai/collection.service';
+import { KpiCard } from '../components/shared/KpiCard';
 import { DataTable } from '../components/DataTable';
 import { TableContainer } from '../components/TableContainer';
+import { ForbiddenPage } from '../components/shared/ForbiddenPage';
+import { RiskBadge } from '../components/ai/RiskBadge';
+import { PriorityBadge } from '../components/ai/PriorityBadge';
+import { AiDisclaimer } from '../components/ai/AiDisclaimer';
+import { canViewReceivableRisk, canActOnRecord } from '../utils/roleAccess';
 
 const getDaysOverdue = (dueDate: string) => {
   if (!dueDate || dueDate === 'N/A') return 0;
@@ -15,12 +23,7 @@ const getDaysOverdue = (dueDate: string) => {
 const formatPeso = (n: number) => `₱${(n || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 
 const getEmployeeNameByRole = (role: string, defaultName: string) => {
-  const r = (role || '').toLowerCase();
-  if (r.includes('head accountant')) return 'Misty';
-  if (r.includes('assistant of finance manager') || r.includes('assistant of fm')) return 'Joana Marie Ogaya';
-  if (r.includes('finance manager')) return 'Crystalyn Joyce C. Fajardo';
-  if (r.includes('accountant')) return 'Maria Mariel Jane Anonuevo';
-  return defaultName;
+  return defaultName || role || 'User';
 };
 
 const SharedKPIs = ({ arRecords }: { arRecords: any[] }) => {
@@ -47,11 +50,11 @@ const SharedKPIs = ({ arRecords }: { arRecords: any[] }) => {
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '16px' }}>
-      <StatusCard label="Total AR" value={formatPeso(totalAr)} icon="ti-wallet" variant="info" />
-      <StatusCard label="0-30 days" value={formatPeso(agingTotals['0-30 days'])} icon="ti-alert-circle" variant="warning" />
-      <StatusCard label="31-60 days" value={formatPeso(agingTotals['31-60 days'])} icon="ti-alert-triangle" variant="warning" />
-      <StatusCard label="61-90 days" value={formatPeso(agingTotals['61-90 days'])} icon="ti-alert-triangle" variant="danger" />
-      <StatusCard label="90+ days" value={formatPeso(agingTotals['90+ days'])} icon="ti-skull" variant="danger" />
+      <KpiCard label="Total AR" value={formatPeso(totalAr)} icon="ti-wallet" variant="info" />
+      <KpiCard label="0-30 days" value={formatPeso(agingTotals['0-30 days'])} icon="ti-alert-circle" variant="warning" />
+      <KpiCard label="31-60 days" value={formatPeso(agingTotals['31-60 days'])} icon="ti-alert-triangle" variant="warning" />
+      <KpiCard label="61-90 days" value={formatPeso(agingTotals['61-90 days'])} icon="ti-alert-triangle" variant="danger" />
+      <KpiCard label="90+ days" value={formatPeso(agingTotals['90+ days'])} icon="ti-skull" variant="danger" />
     </div>
   );
 };
@@ -130,83 +133,39 @@ const ManagerView = ({ token, user, arRecords }: any) => {
 
   const fetchData = async () => {
     setLoading(true);
-    const mockData = [
-      {
-        id: 'REV-999',
-        timestamp: new Date().toLocaleString(),
-        invoiceNumber: 'INV-2026-009',
-        clientName: 'Lazada Philippines',
-        balanceValue: 120500,
-        balance: '₱120,500.00',
-        priorityLevel: 'HIGH PRIORITY',
-        dueDate: new Date(Date.now() - 45 * 86400000).toISOString(),
-        decision: 'Sent to Manager for Approval',
-        loggedBy: 'Maria Mariel Jane Anonuevo',
-        loggedByRole: 'Accountant',
-        actionTaken: 'Sent a final demand letter.',
-        remarks: 'Requires manager approval for legal escalation.'
-      },
-      {
-        id: 'REV-998',
-        timestamp: new Date().toLocaleString(),
-        invoiceNumber: 'INV-2026-015',
-        clientName: 'Shopee Philippines',
-        balanceValue: 45000,
-        balance: '₱45,000.00',
-        priorityLevel: 'HIGH PRIORITY',
-        dueDate: new Date(Date.now() - 20 * 86400000).toISOString(),
-        decision: 'Reject Priority Assignment',
-        loggedBy: 'Joana Marie Ogaya',
-        loggedByRole: 'Assistant of Finance Manager',
-        actionTaken: 'Reviewed client dispute.',
-        remarks: 'Please revise priority as the client promised to pay tomorrow.'
-      }
-    ];
-
     try {
-      const res = await fetch('/api/ai/collection/recommendations?status=all', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const json = await res.json();
-        const logged = Array.isArray(json) 
-          ? json.filter((r: any) => 
-              r.review_status && 
-              r.review_status !== 'Pending Review' && 
-              r.review_status !== 'Reject Priority Assignment'
-            ) 
-          : [];
-          
-        const mapped = logged.map((r: any) => {
-          const role = r.reviewer_role || 'Accountant';
-          return {
-            id: String(r.id),
-            timestamp: r.reviewed_at ? new Date(r.reviewed_at).toLocaleString() : 'N/A',
-            invoiceNumber: r.priority?.normalized_invoice_number || r.priority?.invoice_number || 'N/A',
-            clientName: r.priority?.client_name || 'N/A',
-            balanceValue: r.priority?.outstanding_balance || 0,
-            balance: `₱${(r.priority?.outstanding_balance || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`,
-            priorityLevel: r.priority?.priority_level || 'HIGH PRIORITY',
-            dueDate: r.priority?.due_date || 'N/A',
-            decision: r.review_status || 'Pending',
-            loggedBy: getEmployeeNameByRole(role, r.reviewed_by || r.reviewer_username || 'Maria Mariel Jane Anonuevo'),
-            loggedByRole: role,
-            actionTaken: r.remarks || 'No action taken',
-            remarks: r.recommended_action || 'No remarks',
-          };
-        });
+      const json: any = await http.get('/ai/collection/recommendations', { status: 'all' });
+      const logged = Array.isArray(json) 
+        ? json.filter((r: any) => 
+            r.review_status && 
+            r.review_status !== 'Pending Review' && 
+            r.review_status !== 'Reject Priority Assignment'
+          ) 
+        : [];
         
-        if (mapped.length === 0) {
-          setData(mockData);
-        } else {
-          setData(mapped);
-        }
-      } else {
-        setData(mockData);
-      }
+      const mapped = logged.map((r: any) => {
+        const role = r.reviewer_role || 'Accountant';
+        return {
+          id: String(r.id),
+          timestamp: r.reviewed_at ? new Date(r.reviewed_at).toLocaleString() : 'N/A',
+          invoiceNumber: r.priority?.normalized_invoice_number || r.priority?.invoice_number || 'N/A',
+          clientName: r.priority?.client_name || 'N/A',
+          balanceValue: r.priority?.outstanding_balance || 0,
+          balance: `₱${(r.priority?.outstanding_balance || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`,
+          priorityLevel: r.priority?.priority_level || 'HIGH PRIORITY',
+          dueDate: r.priority?.due_date || 'N/A',
+          decision: r.review_status || 'Pending',
+          loggedBy: getEmployeeNameByRole(role, r.reviewed_by || r.reviewer_username || 'User'),
+          loggedByRole: role,
+          actionTaken: r.remarks || 'No action taken',
+          remarks: r.recommended_action || 'No remarks',
+        };
+      });
+      
+      setData(mapped);
     } catch (e) {
       console.error(e);
-      setData(mockData);
+      setData([]);
     } finally {
       setLoading(false);
     }
@@ -214,7 +173,7 @@ const ManagerView = ({ token, user, arRecords }: any) => {
 
   useEffect(() => {
     fetchData();
-  }, [token]);
+  }, []);
 
   const handleOpenModal = (row: any) => {
     setSelectedRecord(row);
@@ -231,32 +190,17 @@ const ManagerView = ({ token, user, arRecords }: any) => {
     }
     setModalLoading(true);
     try {
-      if (String(selectedRecord.id).startsWith('REV-')) {
-        // Simulate success for mock data
-        await new Promise(resolve => setTimeout(resolve, 600));
-        toast.success(`Decision saved successfully.`, 'Manager Review Logged');
-        setData(prev => prev.filter(item => item.id !== selectedRecord.id));
-        setSelectedRecord(null);
-        setModalLoading(false);
-        return;
-      }
-
       const realId = selectedRecord.id;
-      const res = await fetch(`/api/ai/collection/recommendations/${realId}/review`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ decision, remarks: actionTaken, recommendedAction: remarks }),
+      await http.post(`/ai/collection/recommendations/${realId}/review`, {
+        decision,
+        remarks: actionTaken,
+        recommendedAction: remarks,
       });
-      if (res.ok) {
-        toast.success(`Decision saved successfully.`, 'Manager Review Logged');
-        setSelectedRecord(null);
-        fetchData();
-      } else {
-        const errData = await res.json().catch(() => ({}));
-        toast.error(errData?.message || 'Failed to update decision.', 'Error');
-      }
-    } catch (e) {
-      toast.error('Network error while saving decision.', 'Error');
+      toast.success(`Decision saved successfully.`, 'Manager Review Logged');
+      setSelectedRecord(null);
+      fetchData();
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to update decision.', 'Error');
     } finally {
       setModalLoading(false);
     }
@@ -294,26 +238,18 @@ const ManagerView = ({ token, user, arRecords }: any) => {
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 20 }}>
               {filteredData.map((row, i) => {
-                const p = String(row.priorityLevel || '').toUpperCase();
-                const isHigh = p.includes('HIGH') || p.includes('CRITICAL');
-                const isMed = p.includes('MEDIUM');
-                const badgeColor = isHigh ? '#DC2626' : isMed ? '#D97706' : '#059669';
-                const badgeBg = isHigh ? '#FEF2F2' : isMed ? '#FFFBEB' : '#F0FDF4';
-                const borderColor = isHigh ? '#FECACA' : isMed ? '#FDE68A' : '#A7F3D0';
-                
                 const overdue = getDaysOverdue(row.dueDate);
-                const score = isHigh ? 82 : isMed ? 55 : 15;
-                
                 const isRejected = String(row.decision).toLowerCase().includes('reject');
                 const isApproved = String(row.decision).toLowerCase().includes('accept') || String(row.decision).toLowerCase().includes('process');
                 const decisionColor = isRejected ? '#DC2626' : isApproved ? '#059669' : '#7C3AED';
                 const decisionBg = isRejected ? '#FEF2F2' : isApproved ? '#F0FDF4' : '#EDE9FE';
+                const actCheck = canActOnRecord(user, row, 'resolve');
 
                 return (
                   <div
                     key={row.id || i}
                     style={{
-                      background: '#fff', border: `1px solid ${borderColor}`,
+                      background: '#fff', border: '1px solid #E2E8F0',
                       borderRadius: 12, padding: 24,
                       display: 'flex', flexDirection: 'column', gap: 16,
                       boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
@@ -321,13 +257,10 @@ const ManagerView = ({ token, user, arRecords }: any) => {
                   >
                     {/* Top Row */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ background: badgeBg, color: badgeColor, padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
-                        {row.priorityLevel || 'High Priority'}
-                      </span>
-                      <span style={{ fontWeight: 800, fontSize: 16, color: badgeColor }}>
-                        {score}%
-                      </span>
+                      <PriorityBadge level={row.priorityLevel || 'High Priority'} />
+                      <RiskBadge score={row.score ?? null} level={row.priorityLevel} />
                     </div>
+                    <AiDisclaimer inline />
 
                     {/* Title */}
                     <div>
@@ -385,15 +318,18 @@ const ManagerView = ({ token, user, arRecords }: any) => {
                     <div style={{ marginTop: 'auto', paddingTop: 8 }}>
                       <button
                         onClick={() => handleOpenModal(row)}
+                        disabled={!actCheck.allowed}
+                        title={!actCheck.allowed ? actCheck.reason : undefined}
                         style={{
-                          width: '100%', padding: '12px 0', background: '#0D9488',
+                          width: '100%', padding: '12px 0',
+                          background: !actCheck.allowed ? '#94A3B8' : '#0D9488',
                           color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 13,
-                          cursor: 'pointer', transition: 'background 0.2s'
+                          cursor: !actCheck.allowed ? 'not-allowed' : 'pointer', transition: 'background 0.2s'
                         }}
-                        onMouseEnter={e => { e.currentTarget.style.opacity = '0.9'; }}
-                        onMouseLeave={e => { e.currentTarget.style.opacity = '1'; }}
+                        onMouseEnter={e => { if (actCheck.allowed) e.currentTarget.style.opacity = '0.9'; }}
+                        onMouseLeave={e => { if (actCheck.allowed) e.currentTarget.style.opacity = '1'; }}
                       >
-                        View & Decide
+                        {!actCheck.allowed ? (actCheck.reason || 'Restricted') : 'View & Decide'}
                       </button>
                     </div>
                   </div>
@@ -469,6 +405,7 @@ const ManagerView = ({ token, user, arRecords }: any) => {
 const AccountantView = ({ token, user, arRecords }: any) => {
   const { toast } = useToast() as any;
   const [recs, setRecs] = useState<any[]>([]);
+  const [serverPriorities, setServerPriorities] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
   const [selectedPriority, setSelectedPriority] = useState<any | null>(null);
@@ -481,100 +418,44 @@ const AccountantView = ({ token, user, arRecords }: any) => {
   const fetchRecommendations = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/ai/collection/recommendations?status=all`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setRecs(Array.isArray(data) ? data : []);
-      }
+      const data: any = await http.get('/ai/collection/recommendations', { status: 'all' });
+      setRecs(Array.isArray(data) ? data : []);
+    } catch {}
+    try {
+      const prioRes: any = await collectionService.getPriorityList();
+      const items = Array.isArray(prioRes) ? prioRes : prioRes?.items || [];
+      setServerPriorities(items);
     } catch {}
     setLoading(false);
   };
 
   useEffect(() => {
     fetchRecommendations();
-  }, [token]);
+  }, []);
 
   const priorityList = useMemo(() => {
-    const list = arRecords
-      .filter((r: any) => r.outstandingBalance > 0 && getDaysOverdue(r.dueDate) >= 1)
-      .map((r: any) => {
-        const overdue = getDaysOverdue(r.dueDate);
-        let level = 'Low Priority';
-        let score = 30;
-        
-        if (overdue >= 31) {
-          level = 'High Priority';
-          score = 95;
-        } else if (overdue >= 15) {
-          level = 'Medium Priority';
-          score = 65;
-        }
+    return serverPriorities.map((p: any) => {
+      const overdue = p.daysOverdue ?? p.overdue_days ?? getDaysOverdue(p.dueDate || p.due_date);
+      const invNum = p.invoiceNumber || p.invoice_number;
+      const rejectedRec = recs.find(rec => (rec.priority?.invoice_number === invNum || rec.invoice_number === invNum) && rec.review_status === 'Reject Priority Assignment');
 
-        const rejectedRec = recs.find(rec => (rec.priority?.invoice_number === r.invoiceNumber || rec.invoice_number === r.invoiceNumber) && rec.review_status === 'Reject Priority Assignment');
-
-        return {
-          id: r.id,
-          invoice_number: r.invoiceNumber,
-          client_name: r.clientName,
-          outstanding_balance: r.outstandingBalance,
-          due_date: r.dueDate,
-          priority_level: level,
-          priority_score: score,
-          overdue_days: overdue,
-          is_rejected: !!rejectedRec,
-          rejected_remarks: rejectedRec?.remarks || 'Manager requested revision.',
-          rec_id: rejectedRec?.id || null
-        };
-      })
-      .sort((a: any, b: any) => b.priority_score - a.priority_score);
-
-    if (list.length === 0) {
-      return [
-        {
-          id: 'AR-MOCK-1',
-          invoice_number: 'LZD-2026-0004',
-          client_name: 'Lazada Philippines',
-          outstanding_balance: 13440,
-          due_date: new Date(Date.now() - 35 * 24 * 60 * 60 * 1000).toISOString(),
-          priority_level: 'High Priority',
-          priority_score: 95,
-          overdue_days: 35,
-          is_rejected: true,
-          rejected_remarks: 'Please revise priority as the client promised to pay tomorrow.',
-          rec_id: null
-        },
-        {
-          id: 'AR-MOCK-2',
-          invoice_number: 'SHP-2026-0001',
-          client_name: 'Shopee Express',
-          outstanding_balance: 28500,
-          due_date: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString(),
-          priority_level: 'Medium Priority',
-          priority_score: 65,
-          overdue_days: 20,
-          is_rejected: false,
-          rejected_remarks: '',
-          rec_id: null
-        },
-        {
-          id: 'AR-MOCK-3',
-          invoice_number: 'TK-2026-0003',
-          client_name: 'TikTok Shop',
-          outstanding_balance: 4500,
-          due_date: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
-          priority_level: 'Low Priority',
-          priority_score: 30,
-          overdue_days: 5,
-          is_rejected: false,
-          rejected_remarks: '',
-          rec_id: null
-        }
-      ];
-    }
-    return list;
-  }, [arRecords, recs]);
+      return {
+        id: p.id,
+        invoice_number: invNum || '—',
+        client_name: p.clientName || p.client_name || 'Unknown',
+        outstanding_balance: p.outstandingBalance ?? p.outstanding_balance ?? 0,
+        due_date: p.dueDate || p.due_date || '',
+        priority_level: p.priorityLevel || p.riskLevel || p.priority_level || 'Normal Priority',
+        priority_score: p.priorityScore ?? p.riskScore ?? p.priority_score ?? 0,
+        suggested_action: p.suggestedAction || p.suggested_action || 'Schedule priority follow-up call immediately to secure payment commitments.',
+        overdue_days: overdue,
+        is_rejected: !!rejectedRec,
+        rejected_remarks: rejectedRec?.remarks || 'Manager requested revision.',
+        rec_id: rejectedRec?.id || null,
+        createdBy: p.createdBy,
+      };
+    });
+  }, [serverPriorities, recs]);
 
   const handleOpenModal = (row: any) => {
     setSelectedPriority(row);
@@ -584,27 +465,27 @@ const AccountantView = ({ token, user, arRecords }: any) => {
 
   const handleSubmit = async () => {
     if (!selectedPriority) return;
+    if (selectedPriority.createdBy && (selectedPriority.createdBy === user?.id || selectedPriority.createdBy === user?.employeeId)) {
+      toast.error('You cannot act on your own record.', 'Separation of Duties');
+      return;
+    }
     setModalLoading(true);
     try {
       const endpoint = selectedPriority.rec_id 
-        ? `/api/ai/collection/recommendations/${selectedPriority.rec_id}/review`
-        : `/api/ai/collection/recommendations/new`;
+        ? `/ai/collection/recommendations/${selectedPriority.rec_id}/review`
+        : `/ai/collection/recommendations/new`;
         
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ priority_id: selectedPriority.id, decision, remarks, recommendedAction: remarks }),
+      await http.post(endpoint, {
+        priority_id: selectedPriority.id,
+        decision,
+        remarks,
+        recommendedAction: remarks,
       });
-      if (res.ok) {
-        toast.success(`Priority updated and submitted!`, 'Success');
-        setSelectedPriority(null);
-        fetchRecommendations();
-      } else {
-        const err = await res.json().catch(()=>({}));
-        toast.error(err.message || 'Failed to submit priority', 'Error');
-      }
-    } catch (e) {
-      toast.error('Network error.', 'Error');
+      toast.success(`Priority updated and submitted!`, 'Success');
+      setSelectedPriority(null);
+      fetchRecommendations();
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to submit priority', 'Error');
     } finally {
       setModalLoading(false);
     }
@@ -629,7 +510,12 @@ const AccountantView = ({ token, user, arRecords }: any) => {
         </div>
         
         <div style={{ padding: 24 }}>
-          {filteredPriorityList.length === 0 ? (
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 48, color: '#9CA3AF', fontSize: 14 }}>
+              <i className="ti ti-refresh" style={{ fontSize: 24, animation: 'spin 1s linear infinite', display: 'block', marginBottom: 12 }} />
+              Loading priority accounts...
+            </div>
+          ) : filteredPriorityList.length === 0 ? (
             <div style={{ textAlign: 'center', padding: 48, color: '#9CA3AF', fontSize: 14 }}>
               <i className="ti ti-search" style={{ fontSize: 40, display: 'block', marginBottom: 12 }} />
               No matching priorities found.
@@ -637,22 +523,14 @@ const AccountantView = ({ token, user, arRecords }: any) => {
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 20 }}>
               {filteredPriorityList.map((row: any, i: number) => {
-                const p = String(row.priority_level).toUpperCase();
-                const isHigh = p.includes('HIGH');
-                const isMed = p.includes('MEDIUM');
-                const badgeColor = isHigh ? '#DC2626' : isMed ? '#D97706' : '#059669';
-                const badgeBg = isHigh ? '#FEF2F2' : isMed ? '#FFFBEB' : '#F0FDF4';
-                const borderColor = isHigh ? '#FECACA' : isMed ? '#FDE68A' : '#A7F3D0';
-                
                 const overdue = row.overdue_days || getDaysOverdue(row.due_date);
-                const score = p.includes('HIGH') ? 82 : p.includes('MEDIUM') ? 55 : 15;
-                const actionBasis = 'Client has consistently missed payment deadlines and has a high outstanding balance.';
+                const isCreator = !!(row.createdBy && (row.createdBy === user?.id || row.createdBy === user?.employeeId));
 
                 return (
                   <div
                     key={row.id || i}
                     style={{
-                      background: '#fff', border: `1px solid ${borderColor}`,
+                      background: '#fff', border: '1px solid #E2E8F0',
                       borderRadius: 12, padding: 24,
                       display: 'flex', flexDirection: 'column', gap: 16,
                       boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
@@ -660,13 +538,10 @@ const AccountantView = ({ token, user, arRecords }: any) => {
                   >
                     {/* Top Row */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ background: badgeBg, color: badgeColor, padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
-                        {row.priority_level}
-                      </span>
-                      <span style={{ fontWeight: 800, fontSize: 16, color: badgeColor }}>
-                        {score}%
-                      </span>
+                      <PriorityBadge level={row.priority_level} score={row.priority_score} />
+                      <RiskBadge score={row.priority_score} level={row.priority_level} />
                     </div>
+                    <AiDisclaimer inline />
 
                     {/* Title */}
                     <div>
@@ -713,24 +588,27 @@ const AccountantView = ({ token, user, arRecords }: any) => {
 
                     {/* Action Basis */}
                     <div style={{ marginTop: 8 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: '#6B7280', letterSpacing: '0.05em', marginBottom: 4 }}>ACTION BASIS</div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: '#6B7280', letterSpacing: '0.05em', marginBottom: 4 }}>AI SUGGESTION &amp; ACTION BASIS</div>
                       <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.4 }}>
-                        {actionBasis}
+                        {row.suggested_action}
                       </div>
                     </div>
 
                     <div style={{ marginTop: 'auto', paddingTop: 8 }}>
                       <button
                         onClick={() => handleOpenModal(row)}
+                        disabled={isCreator}
+                        title={isCreator ? 'You cannot act on your own record' : undefined}
                         style={{
-                          width: '100%', padding: '12px 0', background: row.is_rejected ? '#DC2626' : '#0D9488',
+                          width: '100%', padding: '12px 0',
+                          background: isCreator ? '#94A3B8' : row.is_rejected ? '#DC2626' : '#0D9488',
                           color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 13,
-                          cursor: 'pointer', transition: 'background 0.2s'
+                          cursor: isCreator ? 'not-allowed' : 'pointer', transition: 'background 0.2s'
                         }}
-                        onMouseEnter={e => { e.currentTarget.style.opacity = '0.9'; }}
-                        onMouseLeave={e => { e.currentTarget.style.opacity = '1'; }}
+                        onMouseEnter={e => { if (!isCreator) e.currentTarget.style.opacity = '0.9'; }}
+                        onMouseLeave={e => { if (!isCreator) e.currentTarget.style.opacity = '1'; }}
                       >
-                        {row.is_rejected ? 'Revise Recommendation' : 'Review Recommendation'}
+                        {isCreator ? 'Cannot Act (Own Record)' : row.is_rejected ? 'Revise Recommendation' : 'Review Recommendation'}
                       </button>
                     </div>
                   </div>
@@ -752,13 +630,7 @@ const AccountantView = ({ token, user, arRecords }: any) => {
                 <div>
                   <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#64748B', marginBottom: 4 }}>{selectedPriority.invoice_number || 'INV-XXXX-XXXX'}</div>
                   <h3 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800, color: '#0F172A', marginBottom: 12 }}>{selectedPriority.client_name}</h3>
-                  <span style={{ 
-                    background: String(selectedPriority.priority_level).includes('High') ? '#FEF2F2' : String(selectedPriority.priority_level).includes('Medium') ? '#FFFBEB' : '#F0FDF4', 
-                    color: String(selectedPriority.priority_level).includes('High') ? '#DC2626' : String(selectedPriority.priority_level).includes('Medium') ? '#D97706' : '#059669', 
-                    padding: '4px 12px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 700 
-                  }}>
-                    {selectedPriority.priority_level || 'High Priority'}
-                  </span>
+                  <PriorityBadge level={selectedPriority.priority_level} score={selectedPriority.priority_score} />
                 </div>
                 <button onClick={() => setSelectedPriority(null)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#0F172A' }}><i className="ti ti-x" style={{ fontSize: 24 }} /></button>
               </div>
@@ -793,16 +665,8 @@ const AccountantView = ({ token, user, arRecords }: any) => {
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
                     <span style={{ color: '#475569' }}>Priority Level</span>
-                    <span style={{ fontWeight: 700, color: String(selectedPriority.priority_level).includes('High') ? '#DC2626' : String(selectedPriority.priority_level).includes('Medium') ? '#D97706' : '#059669' }}>{selectedPriority.priority_level || 'High Priority'}</span>
+                    <span style={{ fontWeight: 700, color: '#0F172A' }}>{selectedPriority.priority_level || 'Normal Priority'}</span>
                   </div>
-                </div>
-              </div>
-
-              {/* ACTION BASIS */}
-              <div style={{ marginBottom: 28 }}>
-                <div style={{ fontSize: '0.85rem', fontWeight: 800, color: '#0F172A', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>ACTION BASIS</div>
-                <div style={{ fontSize: '0.9rem', color: '#475569', lineHeight: 1.5 }}>
-                  Client has consistently missed payment deadlines and has a high outstanding balance.
                 </div>
               </div>
 
@@ -816,7 +680,10 @@ const AccountantView = ({ token, user, arRecords }: any) => {
                     <i className="ti ti-file-description" style={{ fontSize: 16 }} /> Suggested Action Plan
                   </div>
                   <div style={{ fontSize: '0.9rem', color: '#334155', lineHeight: 1.5 }}>
-                    Schedule a priority follow-up call immediately to secure payment commitments for the overdue ₱{(selectedPriority.outstanding_balance || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}.
+                    {selectedPriority.suggested_action}
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    <AiDisclaimer inline />
                   </div>
                 </div>
               </div>
@@ -832,7 +699,7 @@ const AccountantView = ({ token, user, arRecords }: any) => {
                   <div style={{ position: 'relative' }}>
                     <select value={decision} onChange={e => setDecision(e.target.value)} style={{ width: '100%', appearance: 'none', padding: '10px 14px', border: '1px solid #CBD5E1', borderRadius: '6px', fontSize: '0.9rem', color: '#0F172A', outline: 'none' }}>
                       <option value="Accept Recommendation">Accept Recommendation</option>
-                      <option value="Reviewed & Closed">Reviewed & Closed</option>
+                      <option value="Reviewed & Closed">Reviewed &amp; Closed</option>
                       <option value="Reject Priority Assignment">Reject Priority Assignment</option>
                     </select>
                     <i className="ti ti-chevron-down" style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: '#64748B', pointerEvents: 'none' }} />
@@ -848,7 +715,7 @@ const AccountantView = ({ token, user, arRecords }: any) => {
               {/* Buttons */}
               <div style={{ display: 'flex', gap: 16, marginTop: 32 }}>
                 <button onClick={() => setSelectedPriority(null)} style={{ flex: 1, padding: '12px', background: '#fff', border: '1px solid #CBD5E1', borderRadius: '8px', fontWeight: 700, color: '#0F172A', cursor: 'pointer' }}>Cancel</button>
-                <button disabled={modalLoading} onClick={handleSubmit} style={{ flex: 1, padding: '12px', background: modalLoading ? '#94A3B8' : '#4FD1C5', border: 'none', borderRadius: '8px', fontWeight: 700, color: '#fff', cursor: modalLoading ? 'not-allowed' : 'pointer' }}>
+                <button disabled={modalLoading} onClick={handleSubmit} style={{ flex: 1, padding: '12px', background: modalLoading ? '#94A3B8' : '#0D9488', border: 'none', borderRadius: '8px', fontWeight: 700, color: '#fff', cursor: modalLoading ? 'not-allowed' : 'pointer' }}>
                   {modalLoading ? 'Saving...' : 'Log Decision'}
                 </button>
               </div>
@@ -865,10 +732,17 @@ const AccountantView = ({ token, user, arRecords }: any) => {
 // MAIN WRAPPER
 // ============================================================================
 const AccountsReceivable: React.FC = () => {
-  const { token, user } = useAuth() as any;
-  const { arRecords } = useAppData();
+  const { user } = useAuth();
+  const token = localStorage.getItem('auth_token') || '';
+  const isAllowed = canViewReceivableRisk(user?.role);
+  const { data: arData } = useQuery('ar:records', () => isAllowed ? arService.records({ pageSize: 100 }) : Promise.resolve({ items: [], total: 0 }));
   
-  const isManager = user?.role === 'Finance Manager' || user?.role === 'Head Accountant';
+  if (!isAllowed) {
+    return <ForbiddenPage />;
+  }
+  const arRecords = arData?.items || [];
+  
+  const isManager = user?.role === 'FINANCIAL_MANAGER' || user?.role === 'HEAD_ACCOUNTANT';
 
   return (
     <>

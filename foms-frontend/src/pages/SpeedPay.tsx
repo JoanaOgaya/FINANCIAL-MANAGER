@@ -1,11 +1,17 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useToast } from '../components/ToastContext';
-import { useAppData } from '../context/AppDataContext';
 import { createPortal } from 'react-dom';
-import type { Invoice } from '../data/seed';
 import { Card } from '../components/Card';
 import { User, Lock, AlertCircle, Eye, EyeOff, Calendar } from 'lucide-react';
+import { invoicesService } from '../services/invoicesService';
+import { clientsService } from '../services/clientsService';
+import { speedpayService } from '../services/speedpayService';
+import { paymentsService } from '../services/paymentsService';
+import { useQuery } from '../hooks/useQuery';
+import { Invoice, Client, SpeedPaySubmission } from '../types/entities';
+import { formatCurrency } from '../utils/format';
+import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import './LoginPage.css';
 
 type SpeedPayStep = 'login' | 'dashboard' | 'summary' | 'payment' | 'upload' | 'submitted';
@@ -17,10 +23,6 @@ const PAYMENT_METHODS = [
   { id: 'maya', label: 'Maya', color: '#00AA6C' },
   { id: 'bank', label: 'Bank Transfer (QRPh)', color: '#1E3A5F' },
 ];
-
-function fmt(n: number) {
-  return '₱' + n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
 
 function statusBadge(status: string): React.CSSProperties {
   const s = status.toLowerCase();
@@ -97,14 +99,39 @@ function DonutChart({ segments, size = 100 }: { segments: { label: string; value
 
 export const SpeedPay: React.FC = () => {
   const { toast } = useToast();
-  const { invoices, clients, speedPay, addPayment } = useAppData();
+
+  const { data: initialData, isLoading: loading, error, refetch } = useQuery(
+    'speedpay:portal_data',
+    async () => {
+      const [invRes, cliRes, spRes] = await Promise.all([
+        invoicesService.list({ pageSize: 100 }),
+        clientsService.list({ pageSize: 100 }),
+        speedpayService.list({ pageSize: 100 }),
+      ]);
+      return {
+        invoices: invRes.items || [],
+        clients: cliRes.items || [],
+        speedPay: spRes.items || [],
+      };
+    }
+  );
+
+  const invoices = initialData?.invoices || [];
+  const clients = initialData?.clients || [];
+  const [speedPay, setSpeedPay] = useState<SpeedPaySubmission[]>([]);
+
+  useEffect(() => {
+    if (initialData?.speedPay) {
+      setSpeedPay(initialData.speedPay);
+    }
+  }, [initialData?.speedPay]);
 
   const [step, setStep] = useState<SpeedPayStep>('login');
   const [loginId, setLoginId] = useState('');
   const [loginPass, setLoginPass] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
-  const [loggedInClient, setLoggedInClient] = useState<any>(null);
+  const [loggedInClient, setLoggedInClient] = useState<Client | null>(null);
   const [foundInvoice, setFoundInvoice] = useState<Invoice | null>(null);
   const [selectedMethod, setSelectedMethod] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -128,7 +155,6 @@ export const SpeedPay: React.FC = () => {
     });
   }, []);
 
-
   const profileRef = useRef<HTMLDivElement>(null);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
 
@@ -143,56 +169,44 @@ export const SpeedPay: React.FC = () => {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-
   useEffect(() => {
     const saved = sessionStorage.getItem('speedpay_client');
     if (saved) {
-      const client = JSON.parse(saved);
-      setLoggedInClient(client);
-      setClientEmail(client.email);
-      setStep('dashboard');
+      try {
+        const client = JSON.parse(saved);
+        setLoggedInClient(client);
+        setClientEmail(client.email || '');
+        setStep('dashboard');
+      } catch (e) {}
     }
   }, []);
 
   const clientInvoices = useMemo(() => {
     if (!loggedInClient) return [];
     return invoices.filter(
-      i => i.clientId === loggedInClient.id &&
+      (i: Invoice) => i.clientId === loggedInClient.id &&
         ['Sent', 'Overdue'].includes(i.status)
     );
   }, [loggedInClient, invoices]);
 
-  const toPayGroups = useMemo(() => {
-    const grouped = clientInvoices.reduce((acc, inv) => {
-      const schedule = inv.billingSchedule || 'Monthly';
-      if (!acc[schedule]) acc[schedule] = [];
-      acc[schedule].push(inv);
-      return acc;
-    }, {} as Record<string, Invoice[]>);
-
-    const order = ['Weekly', 'Semi-monthly', 'Monthly'];
-    return Object.entries(grouped).sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]));
-  }, [clientInvoices]);
-
   const recentPayments = useMemo(() => {
     if (!loggedInClient) return [];
     return speedPay
-      .filter(s => s.clientEmail === loggedInClient.email || s.clientName === loggedInClient.contactPerson)
+      .filter((s: SpeedPaySubmission) => s.clientEmail === loggedInClient.email || s.clientName === loggedInClient.contactPerson)
       .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
   }, [loggedInClient, speedPay]);
 
   const handleLogin = () => {
     setLoginError('');
     if (!loginId || !loginPass) { setLoginError('Please fill in both fields.'); return; }
-    if (loginPass !== 'Password@123') { setLoginError('Invalid credentials. (Demo password: Password@123)'); return; }
 
     // loginId is expected to be Invoice Number
-    const invoice = invoices.find(i => i.invoiceNumber.toLowerCase() === loginId.toLowerCase());
+    const invoice = invoices.find((i: Invoice) => i.invoiceNumber.toLowerCase() === loginId.toLowerCase());
     if (!invoice) {
-      setLoginError('Invoice not found. Please try a valid Invoice Number like INV-2023-0001');
+      setLoginError('Invoice not found. Please verify your invoice number.');
       return;
     }
-    const client = clients.find(c => c.id === invoice.clientId);
+    const client = clients.find((c: Client) => c.id === invoice.clientId);
     if (!client) {
       setLoginError('Client account associated with this invoice not found.');
       return;
@@ -221,18 +235,18 @@ export const SpeedPay: React.FC = () => {
   const clientRecentPayments = useMemo(() => {
     if (!loggedInClient) return [];
     return [...speedPay]
-      .filter(s => (s as any).clientId === loggedInClient.id || invoices.find(i => i.id === s.invoiceId)?.clientId === loggedInClient.id)
+      .filter((s: SpeedPaySubmission) => (s as any).clientId === loggedInClient.id || invoices.find((i: Invoice) => i.id === s.invoiceId)?.clientId === loggedInClient.id)
       .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
   }, [loggedInClient, speedPay, invoices]);
 
   // Client Dashboard Charts Data
   const totalOutstanding = useMemo(() =>
-    clientInvoices.reduce((sum, i) => sum + (i.totalAmount ?? 0), 0),
+    clientInvoices.reduce((sum: number, i: Invoice) => sum + (i.totalAmount ?? 0), 0),
     [clientInvoices]
   );
 
   const totalPaid = useMemo(() =>
-    clientRecentPayments.filter(p => p.status === 'Validated' as any || (p as any).status === 'Approved').reduce((sum, p) => sum + ((p as any).amountPaid ?? 0), 0),
+    clientRecentPayments.filter((p: any) => p.status === 'Validated' || p.status === 'Approved').reduce((sum: number, p: any) => sum + ((p as any).amountPaid ?? 0), 0),
     [clientRecentPayments]
   );
 
@@ -245,18 +259,18 @@ export const SpeedPay: React.FC = () => {
       const year = d.getFullYear();
       const month = d.getMonth();
       const value = clientRecentPayments
-        .filter(s => {
+        .filter((s: SpeedPaySubmission) => {
           const sd = new Date((s as any).submittedAt);
-          return sd.getFullYear() === year && sd.getMonth() === month && (s.status === 'Validated' as any);
+          return sd.getFullYear() === year && sd.getMonth() === month && ((s.status as string) === 'Validated');
         })
-        .reduce((sum, s) => sum + ((s as any).amountPaid ?? 0), 0);
+        .reduce((sum: number, s: any) => sum + ((s as any).amountPaid ?? 0), 0);
       months.push({ label, value });
     }
     return months;
   }, [clientRecentPayments]);
 
   const existingSubmissionsForInvoice = (inv: Invoice) => {
-    const sub = speedPay.find(s =>
+    const sub = speedPay.find((s: SpeedPaySubmission) =>
       s.invoiceId === inv.id && (s.status === 'Pending Validation' || s.status === 'Rejected')
     );
     return sub;
@@ -284,16 +298,14 @@ export const SpeedPay: React.FC = () => {
     try {
       const secretKey = import.meta.env.VITE_PAYMONGO_SECRET_KEY;
       if (!secretKey) {
-        // Fallback for demo purposes when no API key is provided
-        window.open('https://developers.paymongo.com/docs/testing', '_blank');
         setIsProcessing(false);
         setStep('upload');
-        toast.info('PayMongo API key not found in .env. Opening PayMongo demo page for testing.', 'Demo Mode');
+        toast.info('PayMongo API key not configured. Proceeding to upload proof directly.');
         return;
       }
 
       const amountInCents = Math.round(foundInvoice.totalAmount * 100);
-      if (amountInCents < 10000) throw new Error(`Minimum amount is ₱100. Invoice total is ${fmt(foundInvoice.totalAmount)}.`);
+      if (amountInCents < 10000) throw new Error(`Minimum amount is ₱100. Invoice total is ${formatCurrency(foundInvoice.totalAmount)}.`);
 
       const response = await fetch('https://api.paymongo.com/v1/links', {
         method: 'POST',
@@ -336,18 +348,6 @@ export const SpeedPay: React.FC = () => {
     }
   };
 
-  const handleSubmit = () => {
-    if (!foundInvoice) return;
-    if (!validateName()) return;
-    if (proofFile) {
-      const reader = new FileReader();
-      reader.onloadend = () => saveSubmission(reader.result as string);
-      reader.readAsDataURL(proofFile);
-    } else {
-      saveSubmission(undefined);
-    }
-  };
-
   const validateName = () => {
     const errors: { first?: string; last?: string; email?: string } = {};
     const nameRegex = /^[a-zA-Z\s'-]+$/;
@@ -362,10 +362,9 @@ export const SpeedPay: React.FC = () => {
     return Object.keys(errors).length === 0;
   };
 
-  const saveSubmission = (fileUrl: string | undefined) => {
+  const saveSubmission = async (fileUrl: string | undefined) => {
     const fullName = `${firstName.trim()} ${lastName.trim()}`;
-    const newPayment = {
-      id: `PAY-${Date.now()}`,
+    const newPaymentData = {
       invoiceId: foundInvoice!.id,
       clientId: loggedInClient!.id,
       amount: foundInvoice!.totalAmount,
@@ -378,11 +377,28 @@ export const SpeedPay: React.FC = () => {
       recordedAt: new Date().toISOString(),
       notes: `SpeedPay transaction by ${fullName} (${clientEmail})`
     };
-    addPayment(newPayment);
-    setExistingSubmission(newPayment);
-    setStep('submitted');
-    setShowEmailModal(true);
-    toast.success('Proof submitted. Pending Finance validation.', 'Payment Submitted');
+
+    try {
+      const created = await paymentsService.create(newPaymentData as any);
+      setExistingSubmission(created);
+      setStep('submitted');
+      setShowEmailModal(true);
+      toast.success('Proof submitted. Pending Finance validation.', 'Payment Submitted');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to submit payment proof');
+    }
+  };
+
+  const handleSubmit = () => {
+    if (!foundInvoice) return;
+    if (!validateName()) return;
+    if (proofFile) {
+      const reader = new FileReader();
+      reader.onloadend = () => saveSubmission(reader.result as string);
+      reader.readAsDataURL(proofFile);
+    } else {
+      saveSubmission(undefined);
+    }
   };
 
   const qrValue = foundInvoice
@@ -396,12 +412,14 @@ export const SpeedPay: React.FC = () => {
     </button>
   );
 
-  // ══════════════════════════════════════════════════════════════
+  if (loading) {
+    return <LoadingSpinner text="Loading SpeedPay portal..." />;
+  }
+
   // LOGIN LAYOUT
   if (step === 'login') {
     return (
       <div className="login-shell">
-        {/* ── LEFT PANEL ── */}
         <aside className="login-left">
           <div className="login-logo-area">
             <img src="/logo.png" alt="Speedex" className="login-logo-img" onError={(e) => (e.currentTarget as HTMLImageElement).style.display = 'none'} />
@@ -431,7 +449,6 @@ export const SpeedPay: React.FC = () => {
           </div>
         </aside>
 
-        {/* ── RIGHT PANEL ── */}
         <main className="login-right">
           <div className="login-card">
             <p className="login-card-label">SECURE ACCESS</p>
@@ -444,7 +461,7 @@ export const SpeedPay: React.FC = () => {
                 <label className="login-label">INVOICE NUMBER</label>
                 <div className="login-input-wrap">
                   <span className="login-input-icon"><User size={16} /></span>
-                  <input type="text" className="login-input" placeholder="INV-2023-0001" value={loginId} onChange={e => setLoginId(e.target.value)} />
+                  <input type="text" className="login-input" placeholder="e.g. INV-001" value={loginId} onChange={e => setLoginId(e.target.value)} />
                 </div>
               </div>
               <div className="login-field">
@@ -475,21 +492,15 @@ export const SpeedPay: React.FC = () => {
 
               <button type="submit" className="login-btn">LOG IN</button>
             </form>
-
-
-
           </div>
         </main>
       </div>
     );
   }
 
-  // ══════════════════════════════════════════════════════════════
   // DASHBOARD LAYOUT
   return (
     <div className="app-layout" style={{ alignItems: 'stretch' }}>
-
-      {/* ── SIDEBAR ── */}
       <aside className="sidebar">
         <div className="sidebar-logo">
           <div className="logo-img-wrapper">
@@ -565,10 +576,7 @@ export const SpeedPay: React.FC = () => {
         )}
       </aside>
 
-      {/* ── MAIN AREA ── */}
       <div className="main-area" style={{ justifyContent: 'flex-start', height: '100vh', overflowY: 'auto', overflowX: 'hidden', boxSizing: 'border-box' }}>
-
-        {/* ── GLOBAL HEADER ── */}
         <header className="global-header" style={{ justifyContent: 'space-between', padding: '10px 28px', background: '#fff', borderBottom: '1px solid #E2E8F0', display: 'flex', alignItems: 'center' }}>
           <div className="gh-left">
             <h1 style={{ fontSize: '1.1rem', fontWeight: 800, color: '#0F172A', margin: 0 }}>
@@ -583,13 +591,11 @@ export const SpeedPay: React.FC = () => {
           </div>
         </header>
 
-        {/* ── CONTENT AREA ── */}
         <main className="content-area" style={{ flex: 1, padding: '28px', background: '#EEF2FF', display: 'flex', flexDirection: 'column', minWidth: 0, boxSizing: 'border-box', width: '100%', maxWidth: '100%' }}>
           <div style={{ maxWidth: 860, margin: '0 auto', width: '100%' }}>
 
             {step === 'dashboard' && dashTab === 'dashboard' && (
               <>
-                {/* ── Dashboard Charts ── */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
                   <div style={{ background: '#fff', border: '1px solid #E2E8F0', borderRadius: 12, padding: 24, display: 'flex', alignItems: 'center', gap: 24 }}>
                     <div style={{ flex: 1 }}>
@@ -601,14 +607,14 @@ export const SpeedPay: React.FC = () => {
                             <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#10B981' }} />
                             <span style={{ fontSize: 13, color: '#475569', fontWeight: 600 }}>Total Paid</span>
                           </div>
-                          <span style={{ fontSize: 13, color: '#0F172A', fontWeight: 700 }}>₱{totalPaid.toLocaleString('en-PH', { maximumFractionDigits: 0 })}</span>
+                          <span style={{ fontSize: 13, color: '#0F172A', fontWeight: 700 }}>{formatCurrency(totalPaid)}</span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#F43F5E' }} />
                             <span style={{ fontSize: 13, color: '#475569', fontWeight: 600 }}>Outstanding</span>
                           </div>
-                          <span style={{ fontSize: 13, color: '#0F172A', fontWeight: 700 }}>₱{totalOutstanding.toLocaleString('en-PH', { maximumFractionDigits: 0 })}</span>
+                          <span style={{ fontSize: 13, color: '#0F172A', fontWeight: 700 }}>{formatCurrency(totalOutstanding)}</span>
                         </div>
                       </div>
                     </div>
@@ -639,8 +645,6 @@ export const SpeedPay: React.FC = () => {
                     )}
                   </div>
                 </div>
-
-
               </>
             )}
 
@@ -667,23 +671,14 @@ export const SpeedPay: React.FC = () => {
                       <i className="ti ti-search" style={{ color: '#49454F', fontSize: '16px' }} />
                       <input type="text" placeholder="Search invoice number..." style={{ border: 'none', outline: 'none', background: 'transparent', width: '100%', fontSize: '0.9375rem', color: '#1C1B1F' }} />
                     </div>
-                    <select style={{ padding: '0 12px', border: '1px solid #CBD5E1', borderRadius: 8, background: '#fff', fontSize: 13, color: '#0F172A', fontWeight: 600 }}>
-                      <option>All statuses</option>
-                    </select>
-                    <select style={{ padding: '0 12px', border: '1px solid #CBD5E1', borderRadius: 8, background: '#fff', fontSize: 13, color: '#0F172A', fontWeight: 600 }}>
-                      <option>All service areas</option>
-                    </select>
-                    <select style={{ padding: '0 12px', border: '1px solid #CBD5E1', borderRadius: 8, background: '#fff', fontSize: 13, color: '#0F172A', fontWeight: 600 }}>
-                      <option>Due date: soonest</option>
-                    </select>
                   </div>
 
                   <p style={{ fontSize: 12, color: '#64748B', marginBottom: 16, fontWeight: 600 }}>{clientInvoices.length} invoices found</p>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    {clientInvoices.map(inv => {
+                    {clientInvoices.map((inv: Invoice) => {
                       const isSelected = foundInvoice?.id === inv.id;
-                      const isOverdue = inv.status === 'Overdue' || inv.status === 'Outstanding';
+                      const isOverdue = inv.status === 'Overdue' || (inv.status as string) === 'Outstanding';
                       const isDueSoon = !isOverdue && new Date(inv.dueDate) >= new Date();
                       return (
                         <div key={inv.id} onClick={() => handleSelectInvoice(inv)} style={{ display: 'flex', alignItems: 'center', padding: '16px 20px', borderRadius: 12, border: isSelected ? '2px solid #10B981' : '1px solid #E2E8F0', background: isSelected ? '#F0FDF4' : '#fff', cursor: 'pointer', transition: 'all 0.2s' }}>
@@ -700,7 +695,7 @@ export const SpeedPay: React.FC = () => {
                             <div style={{ color: '#64748B', fontSize: 13 }}>{loggedInClient?.serviceArea || 'National Capital Region'}</div>
                           </div>
                           <div style={{ textAlign: 'right' }}>
-                            <div style={{ fontWeight: 800, color: '#0F172A', fontSize: '1.05rem' }}>{fmt(inv.totalAmount)}</div>
+                            <div style={{ fontWeight: 800, color: '#0F172A', fontSize: '1.05rem' }}>{formatCurrency(inv.totalAmount)}</div>
                             <div style={{ color: '#94A3B8', fontSize: 11, marginTop: 4, fontWeight: 600 }}>Due {new Date(inv.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
                           </div>
                         </div>
@@ -720,7 +715,7 @@ export const SpeedPay: React.FC = () => {
                     <div style={{ border: '1px solid #E2E8F0', borderRadius: 12, padding: 32, background: '#fff' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 32 }}>
                         <div>
-                          <h4 style={{ margin: '0 0 6px', fontSize: '1.1rem', fontWeight: 900, color: '#0F172A', textTransform: 'uppercase' }}>{loggedInClient?.name || 'TEST COMPANY'}</h4>
+                          <h4 style={{ margin: '0 0 6px', fontSize: '1.1rem', fontWeight: 900, color: '#0F172A', textTransform: 'uppercase' }}>{loggedInClient?.name || 'Client'}</h4>
                           <p style={{ margin: 0, fontSize: 11, color: '#64748B', textTransform: 'uppercase', fontWeight: 600 }}>SERVICE AREA: {loggedInClient?.serviceArea || 'NATIONAL CAPITAL REGION'}</p>
                           <p style={{ margin: '2px 0 0', fontSize: 11, color: '#64748B', textTransform: 'uppercase', fontWeight: 600 }}>METRO MANILA, PHILIPPINES</p>
                         </div>
@@ -735,7 +730,7 @@ export const SpeedPay: React.FC = () => {
                           </div>
                           <div>
                             <div style={{ fontSize: 11, color: '#64748B', marginBottom: 4, fontWeight: 600 }}>Please Pay</div>
-                            <div style={{ fontSize: '1.6rem', fontWeight: 900, color: '#0F172A' }}>{fmt(foundInvoice.totalAmount)}</div>
+                            <div style={{ fontSize: '1.6rem', fontWeight: 900, color: '#0F172A' }}>{formatCurrency(foundInvoice.totalAmount)}</div>
                           </div>
                         </div>
                       </div>
@@ -753,25 +748,25 @@ export const SpeedPay: React.FC = () => {
                       <div style={{ borderTop: '1px solid #E2E8F0', padding: '20px 0' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
                           <span style={{ color: '#0F172A', fontSize: 14, fontWeight: 800 }}>Charges for this billing period</span>
-                          <span style={{ color: '#0F172A', fontSize: 14, fontWeight: 800 }}>{fmt(foundInvoice.totalAmount)}</span>
+                          <span style={{ color: '#0F172A', fontSize: 14, fontWeight: 800 }}>{formatCurrency(foundInvoice.totalAmount)}</span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12, paddingLeft: 16 }}>
                           <span style={{ color: '#64748B', fontSize: 13 }}>Logistics Services</span>
-                          <span style={{ color: '#64748B', fontSize: 13, fontWeight: 500 }}>{fmt(foundInvoice.amount)}</span>
+                          <span style={{ color: '#64748B', fontSize: 13, fontWeight: 500 }}>{formatCurrency(foundInvoice.amount)}</span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12, paddingLeft: 16 }}>
                           <span style={{ color: '#64748B', fontSize: 13 }}>Government Taxes (VAT)</span>
-                          <span style={{ color: '#64748B', fontSize: 13, fontWeight: 500 }}>{fmt(foundInvoice.vatAmount)}</span>
+                          <span style={{ color: '#64748B', fontSize: 13, fontWeight: 500 }}>{formatCurrency(foundInvoice.vatAmount)}</span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', paddingLeft: 16 }}>
                           <span style={{ color: '#64748B', fontSize: 13 }}>Other Surcharges</span>
-                          <span style={{ color: '#64748B', fontSize: 13, fontWeight: 500 }}>{fmt(foundInvoice.surchargeAmount)}</span>
+                          <span style={{ color: '#64748B', fontSize: 13, fontWeight: 500 }}>{formatCurrency(foundInvoice.surchargeAmount)}</span>
                         </div>
                       </div>
 
                       <div style={{ borderTop: '2px solid #E2E8F0', borderBottom: '2px solid #E2E8F0', padding: '24px 0', display: 'flex', justifyContent: 'space-between', marginBottom: 28 }}>
                         <span style={{ color: '#0F172A', fontSize: '1.15rem', fontWeight: 900 }}>Total Amount Due</span>
-                        <span style={{ color: '#0F172A', fontSize: '1.15rem', fontWeight: 900 }}>{fmt(foundInvoice.totalAmount)}</span>
+                        <span style={{ color: '#0F172A', fontSize: '1.15rem', fontWeight: 900 }}>{formatCurrency(foundInvoice.totalAmount)}</span>
                       </div>
 
                       <div style={{ background: '#FEF3C7', border: '1px solid #FDE68A', borderRadius: 8, padding: '16px', marginBottom: 24, display: 'flex', gap: 12, alignItems: 'center' }}>
@@ -811,12 +806,12 @@ export const SpeedPay: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {recentPayments.map(pay => {
-                          const inv = invoices.find(i => i.id === pay.invoiceId);
+                        {recentPayments.map((pay: SpeedPaySubmission) => {
+                          const inv = invoices.find((i: Invoice) => i.id === pay.invoiceId);
                           return (
                             <tr key={pay.id} style={{ borderBottom: '1px solid #F1F5F9' }}>
                               <td style={{ ...tdStyle, fontWeight: 700, color: '#0F172A' }}>{inv?.invoiceNumber ?? '—'}</td>
-                              <td style={{ ...tdStyle, fontWeight: 700 }}>{fmt(pay.amountPaid)}</td>
+                              <td style={{ ...tdStyle, fontWeight: 700 }}>{formatCurrency(pay.amountPaid)}</td>
                               <td style={tdStyle}>{new Date(pay.submittedAt).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</td>
                               <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: '0.8rem' }}>{pay.referenceNumber}</td>
                               <td style={tdStyle}>{pay.paymentMethod}</td>
@@ -838,16 +833,16 @@ export const SpeedPay: React.FC = () => {
 
                 <div style={{ background: 'linear-gradient(135deg,#0F172A,#1E3A5F)', borderRadius: 14, padding: '24px', marginBottom: 20, textAlign: 'center' }}>
                   <p style={{ margin: '0 0 6px', fontSize: '0.78rem', color: '#94A3B8', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Total Amount Due</p>
-                  <p style={{ margin: 0, fontSize: '2.4rem', fontWeight: 900, color: '#fff' }}>{fmt(foundInvoice.totalAmount)}</p>
+                  <p style={{ margin: 0, fontSize: '2.4rem', fontWeight: 900, color: '#fff' }}>{formatCurrency(foundInvoice.totalAmount)}</p>
                 </div>
 
                 <div style={{ border: '1px solid #E2E8F0', borderRadius: 10, overflow: 'hidden', marginBottom: 20 }}>
                   {[
                     { label: 'Invoice No.', value: foundInvoice.invoiceNumber },
                     { label: 'Billing Period', value: foundInvoice.billingPeriod },
-                    { label: 'Base Amount', value: fmt(foundInvoice.amount) },
-                    { label: 'VAT (12%)', value: fmt(foundInvoice.vatAmount) },
-                    { label: 'Surcharge', value: fmt(foundInvoice.surchargeAmount) },
+                    { label: 'Base Amount', value: formatCurrency(foundInvoice.amount) },
+                    { label: 'VAT (12%)', value: formatCurrency(foundInvoice.vatAmount) },
+                    { label: 'Surcharge', value: formatCurrency(foundInvoice.surchargeAmount) },
                   ].map((row, i) => (
                     <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '11px 16px', borderBottom: '1px solid #F1F5F9', background: i % 2 === 0 ? '#fff' : '#F8FAFC' }}>
                       <span style={{ fontSize: '0.875rem', color: '#64748B' }}>{row.label}</span>
@@ -856,7 +851,7 @@ export const SpeedPay: React.FC = () => {
                   ))}
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '14px 16px', background: '#F1F5F9' }}>
                     <span style={{ fontSize: '0.95rem', fontWeight: 700, color: '#0F172A' }}>Total Due</span>
-                    <span style={{ fontSize: '0.95rem', fontWeight: 800, color: '#6366F1' }}>{fmt(foundInvoice.totalAmount)}</span>
+                    <span style={{ fontSize: '0.95rem', fontWeight: 800, color: '#6366F1' }}>{formatCurrency(foundInvoice.totalAmount)}</span>
                   </div>
                 </div>
 
@@ -899,10 +894,10 @@ export const SpeedPay: React.FC = () => {
                       <QRCodeSVG value={qrValue} size={160} bgColor="#ffffff" fgColor="#0F172A" level="M" />
                     </div>
                     <div style={{ marginTop: 14, background: '#EEF2FF', borderRadius: 8, padding: '10px 14px' }}>
-                      <p style={{ margin: 0, fontSize: '0.82rem', fontWeight: 600, color: '#3730A3' }}>Amount: {fmt(foundInvoice.totalAmount)}</p>
+                      <p style={{ margin: 0, fontSize: '0.82rem', fontWeight: 600, color: '#3730A3' }}>Amount: {formatCurrency(foundInvoice.totalAmount)}</p>
                       <p style={{ margin: '2px 0 0', fontSize: '0.75rem', color: '#6366F1' }}>Ref: {foundInvoice.invoiceNumber} · {loggedInClient?.name}</p>
                     </div>
-                    <p style={{ margin: '10px 0 0', fontSize: '0.72rem', color: '#94A3B8' }}>Powered by InstaPay / PESONet · Test Mode</p>
+                    <p style={{ margin: '10px 0 0', fontSize: '0.72rem', color: '#94A3B8' }}>Powered by InstaPay / PESONet · Secure Online Gateway</p>
                   </div>
                 )}
 
@@ -944,7 +939,6 @@ export const SpeedPay: React.FC = () => {
                     <label style={labelStyle}>Transaction Reference No. *</label>
                     <input value={referenceNumber} onChange={e => setReferenceNumber(e.target.value)} placeholder={selectedMethod === 'bank' ? 'Enter reference number from receipt' : 'Auto-filled from PayMongo'} style={inputStyle} />
                   </div>
-                  {/* ── Name Fields (separate first/last for PayMongo) ── */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                     <div>
                       <label style={labelStyle}>First Name *</label>
@@ -1017,7 +1011,7 @@ export const SpeedPay: React.FC = () => {
                   <div style={{ background: '#F8FAFC', borderRadius: 10, padding: '14px 18px', marginBottom: 20, textAlign: 'left', border: '1px solid #E2E8F0' }}>
                     {[
                       { label: 'Invoice', value: foundInvoice?.invoiceNumber ?? '—' },
-                      { label: 'Amount', value: foundInvoice ? fmt(foundInvoice.totalAmount) : '—' },
+                      { label: 'Amount', value: foundInvoice ? formatCurrency(foundInvoice.totalAmount) : '—' },
                       { label: 'Reference No.', value: existingSubmission?.referenceNumber ?? referenceNumber },
                       { label: 'Status', value: existingSubmission?.status ?? 'Pending Validation' },
                     ].map(r => (
@@ -1046,7 +1040,7 @@ export const SpeedPay: React.FC = () => {
             <div style={{ background: '#F8FAFC', padding: '14px 20px', borderBottom: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <i className="ti ti-mail-check" style={{ color: '#10B981', fontSize: 20 }} />
-                <span style={{ fontWeight: 700, color: '#0F172A', fontSize: '0.9rem' }}>Simulated Email Confirmation</span>
+                <span style={{ fontWeight: 700, color: '#0F172A', fontSize: '0.9rem' }}>Email Confirmation</span>
               </div>
               <button onClick={() => setShowEmailModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94A3B8', fontSize: 20 }}><i className="ti ti-x" /></button>
             </div>
@@ -1059,7 +1053,7 @@ export const SpeedPay: React.FC = () => {
                   We've received your proof of payment for invoice <strong>{foundInvoice?.invoiceNumber}</strong>. It is currently being reviewed by the Finance Team.
                 </p>
                 <div style={{ background: '#F8FAFC', padding: '12px 14px', borderRadius: 8, marginBottom: 16, fontSize: '0.85rem', lineHeight: 1.8 }}>
-                  <div><span style={{ color: '#64748B' }}>Amount: </span><strong>{foundInvoice ? fmt(foundInvoice.totalAmount) : '—'}</strong></div>
+                  <div><span style={{ color: '#64748B' }}>Amount: </span><strong>{foundInvoice ? formatCurrency(foundInvoice.totalAmount) : '—'}</strong></div>
                   <div><span style={{ color: '#64748B' }}>Reference: </span><strong>{referenceNumber}</strong></div>
                   <div><span style={{ color: '#64748B' }}>Status: </span><strong style={{ color: '#F59E0B' }}>Pending Validation</strong></div>
                 </div>

@@ -2,26 +2,43 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { DataTable } from '../components/DataTable';
-import { StatusBadge } from '../components/StatusBadge';
+import { StatusBadge } from '../components/shared/StatusBadge';
 import { Button } from '../components/Buttons';
 import { Card } from '../components/Card';
-import { Client } from '../data/seed';
 import { useToast } from '../components/ToastContext';
 import { useAuth } from '../context/AuthContext';
-import { useAppData } from '../context/AppDataContext';
+import { useQuery } from '../hooks/useQuery';
+import { clientsService } from '../services/clientsService';
+import { invoicesService } from '../services/invoicesService';
+import { paymentsService } from '../services/paymentsService';
+import { waybillsService } from '../services/waybillsService';
+import { ratesService } from '../services/ratesService';
+import { auditLogsService } from '../services/auditLogsService';
+import type { Client, Invoice, Payment, Waybill, BillingRate } from '../types/entities';
 import { TableContainer } from '../components/TableContainer';
 import { Dropdown } from '../components/Dropdown';
 import { Users, FileText, Phone, Mail, MapPin, Calendar as CalIcon, Hash, Settings, CreditCard } from 'lucide-react';
-import api from '../services/api';
 import { CalendarPicker } from '../components/FormModals';
 import { computeFreightCost } from '../utils/billing';
+import { formatCurrency, formatDate } from '../utils/format';
 
 export const ClientManagement: React.FC = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
   const { user } = useAuth();
-  const { clients, invoices, payments, waybills, billingRecords, billingRates, updateClient, addClient, addAuditLog } = useAppData();
+
+  const { data: clientsData, refetch: refetchClients } = useQuery('clients:list', () => clientsService.list({ pageSize: 100 }));
+  const { data: invoicesData } = useQuery('clients:invoices', () => invoicesService.list({ pageSize: 100 }));
+  const { data: paymentsData } = useQuery('clients:payments', () => paymentsService.list({ pageSize: 100 }));
+  const { data: waybillsData } = useQuery('clients:waybills', () => waybillsService.list({ pageSize: 100 }));
+  const { data: ratesData } = useQuery('clients:rates', () => ratesService.list({ pageSize: 100 }));
+
+  const clients: Client[] = clientsData?.items || [];
+  const invoices: Invoice[] = invoicesData?.items || [];
+  const payments: Payment[] = paymentsData?.items || [];
+  const waybills: Waybill[] = waybillsData?.items || [];
+  const billingRates: BillingRate[] = ratesData?.items || [];
 
   // List view state
   const [isAddingNew, setIsAddingNew] = useState(false);
@@ -145,86 +162,73 @@ export const ClientManagement: React.FC = () => {
     toast.success('Official Receipt downloaded successfully!');
   };
 
-  const handleEditSubmit = (e: React.FormEvent) => {
+  const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (id) {
-      updateClient(id, {
-        name: formData.name,
-        contactPerson: formData.contactPerson,
-        phone: formData.contactNumber,
-        address: formData.address,
-        billingSchedule: formData.billingSchedule as any,
-        status: formData.status as any,
-      });
-      addAuditLog({
-        id: `AL-${Date.now()}`,
-        userId: user?.employeeId || 'U-000',
-        userFullName: user?.fullName || 'System',
-        userRole: user?.role || 'Accountant',
-        action: 'UPDATE_CLIENT',
-        module: 'ClientManagement',
-        recordId: id,
-        recordType: 'Client',
-        ipAddress: '127.0.0.1',
-        details: `Updated client profile: ${id}`,
-        timestamp: new Date().toISOString()
-      });
-      toast.success(`Client ${id} successfully updated.`);
-      setIsEditMode(false);
+      try {
+        await clientsService.update(id, {
+          name: formData.name,
+          contactPerson: formData.contactPerson,
+          phone: formData.contactNumber,
+          address: formData.address,
+          billingSchedule: formData.billingSchedule as any,
+          status: formData.status as any,
+        });
+        await auditLogsService.create({
+          action: 'UPDATE_CLIENT',
+          module: 'ClientManagement',
+          recordId: id,
+          recordType: 'Client',
+          details: `Updated client profile: ${id}`,
+          ipAddress: '127.0.0.1',
+        });
+        refetchClients();
+        toast.success(`Client ${id} successfully updated.`);
+        setIsEditMode(false);
+      } catch {
+        toast.error('Failed to update client.');
+      }
     }
   };
 
   const handleAddNewSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const payload = {
-        clientCode: `CLI-${Math.floor(1000 + Math.random() * 9000)}`,
+      const payload: Partial<Client> = {
         name: formData.name,
-        businessName: formData.name,
         contactPerson: formData.contactPerson,
-        contactNumber: formData.contactNumber,
-        email: `no-reply-${Math.floor(1000 + Math.random() * 9000)}@speedex.com`,
+        phone: formData.contactNumber,
+        email: `${formData.name.toLowerCase().replace(/[^a-z0-9]/g, '')}@client.com`,
         address: formData.address,
-        tin: '',
-        creditLimit: 0
+        billingSchedule: formData.billingSchedule as any,
+        status: formData.status as any,
+        region: 'Metro Manila',
+        vatStatus: 'VATable',
+        vatRate: 12,
       };
 
-      const res = await api.post('/clients', payload);
-      const newClient = res.data;
-
-      const clientRecord: Client = {
-        id: newClient.id ?? newClient.clientCode ?? `CLI-${Date.now()}`,
-        name: newClient.name ?? newClient.businessName ?? formData.name,
-        contactPerson: newClient.contactPerson ?? formData.contactPerson,
-        email: newClient.email ?? '',
-        phone: newClient.contactNumber ?? '',
-        address: newClient.address ?? formData.address,
-        region: newClient.region ?? 'Metro Manila',
-        billingSchedule: newClient.billingSchedule ?? formData.billingSchedule,
-        status: newClient.status === 'Active' ? 'Active' : 'Inactive',
-        vatStatus: newClient.vatStatus ?? 'VATable',
-        vatRate: newClient.vatRate ?? 12,
-        createdAt: newClient.dateRegistered ?? new Date().toISOString(),
-      };
-
-      addClient(clientRecord);
-      addAuditLog({
-        id: `AL-${Date.now()}`,
-        userId: user?.employeeId || 'U-000',
-        userFullName: user?.fullName || 'System',
-        userRole: user?.role || 'Accountant',
+      const created = await clientsService.create(payload as any);
+      await auditLogsService.create({
         action: 'CREATE_CLIENT',
         module: 'ClientManagement',
-        recordId: clientRecord.id,
+        recordId: (created as any)?.id || formData.name,
         recordType: 'Client',
+        details: `Created new client: ${formData.name}`,
         ipAddress: '127.0.0.1',
-        details: `Created new client: ${clientRecord.id}`,
-        timestamp: new Date().toISOString()
       });
-      toast.success(`Client successfully created.`);
+      refetchClients();
+      toast.success('Client successfully created.');
       setIsAddingNew(false);
-    } catch (err) {
-      console.error(err);
+      setFormData({
+        name: '',
+        contactPerson: '',
+        contactNumber: '',
+        address: '',
+        rateType: 'Standard',
+        billingSchedule: 'Monthly',
+        status: 'Active'
+      });
+    } catch {
       toast.error('Failed to create client.');
     }
   };
@@ -384,7 +388,7 @@ export const ClientManagement: React.FC = () => {
                             {(() => {
                               let count = waybills.filter(w => w.invoiceId === inv.id || w.invoiceId === inv.invoiceNumber || inv.waybillIds?.includes(w.id)).length;
                               if (count === 0) count = waybills.filter(w => w.clientCode === inv.clientId).length;
-                              return count > 0 ? count : (inv.waybillIds?.length || Math.floor(Math.random() * 10) + 5);
+                              return count > 0 ? count : (inv.waybillIds?.length || 0);
                             })()}
                           </td>
                           <td style={{ padding: '12px 16px', color: '#0F172A', fontWeight: 600 }}>₱ {inv.totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
@@ -414,7 +418,7 @@ export const ClientManagement: React.FC = () => {
             </div>
 
             {/* Payment Records Card */}
-            {user?.role === 'Accountant' && (
+            {user?.role === 'ACCOUNTANT' && (
               <div style={{ background: '#fff', border: '1px solid #E2E8F0', padding: '24px', borderRadius: '12px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -497,13 +501,13 @@ export const ClientManagement: React.FC = () => {
                 <div style={{ background: '#ffffff', borderRadius: '12px', width: '100%', maxWidth: '850px', maxHeight: '90vh', overflowY: 'auto', padding: '32px', color: '#334155', boxShadow: '0 10px 25px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
                     {(() => {
-                      let invoiceWaybills = waybills.filter(w => w.invoiceId === selectedInvoiceForModal.id || w.invoiceId === selectedInvoiceForModal.invoiceNumber || selectedInvoiceForModal.waybillIds?.includes(w.id));
+                      let invoiceWaybills = waybills.filter((w: Waybill) => w.invoiceId === selectedInvoiceForModal.id || w.invoiceId === selectedInvoiceForModal.invoiceNumber || selectedInvoiceForModal.waybillIds?.includes(w.id));
                       if (invoiceWaybills.length === 0) {
-                        invoiceWaybills = waybills.filter(w => w.clientCode === selectedInvoiceForModal.clientId);
+                        invoiceWaybills = waybills.filter((w: Waybill) => w.clientCode === selectedInvoiceForModal.clientId);
                       }
                       
                       const earliestDate = invoiceWaybills.length > 0 
-                        ? new Date(Math.min(...invoiceWaybills.map(w => new Date(w.deliveryDate).getTime()))) 
+                        ? new Date(Math.min(...invoiceWaybills.map((w: Waybill) => new Date(w.deliveryDate).getTime()))) 
                         : new Date();
                         
                       return (
@@ -519,14 +523,13 @@ export const ClientManagement: React.FC = () => {
                   </div>
 
                   {(() => {
-                    let invoiceWaybills = waybills.filter(w => w.invoiceId === selectedInvoiceForModal.id || w.invoiceId === selectedInvoiceForModal.invoiceNumber || selectedInvoiceForModal.waybillIds?.includes(w.id));
+                    let invoiceWaybills = waybills.filter((w: Waybill) => w.invoiceId === selectedInvoiceForModal.id || w.invoiceId === selectedInvoiceForModal.invoiceNumber || selectedInvoiceForModal.waybillIds?.includes(w.id));
                     if (invoiceWaybills.length === 0) {
-                      // Fallback for mock data or missing backend relations
-                      invoiceWaybills = waybills.filter(w => w.clientCode === selectedInvoiceForModal.clientId);
+                      invoiceWaybills = waybills.filter((w: Waybill) => w.clientCode === selectedInvoiceForModal.clientId);
                     }
                     return (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                        {invoiceWaybills.map((wb, i) => {
+                        {invoiceWaybills.map((wb: Waybill, i: number) => {
                           let fd = null;
                           let errorMsg = null;
                           let freightAmount = 0;

@@ -2,9 +2,12 @@ import React from 'react';
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import GlobalHeader from './GlobalHeader';
-
+import { useRealtime } from '../hooks/useRealtime';
 
 export const MainLayout: React.FC = () => {
+  // Realtime connection lives only while a session is mounted; logout unmounts it.
+  useRealtime(true);
+
   return (
     <div className="app-layout" style={{ alignItems: 'stretch' }}>
       <Sidebar />

@@ -3,30 +3,30 @@ import { createPortal } from 'react-dom';
 import { UploadCloud, CheckCircle, Clock, AlertTriangle, X, Search, Camera, ZoomIn, ZoomOut, Info } from 'lucide-react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { DataTable } from '../components/DataTable';
-import { StatusBadge } from '../components/StatusBadge';
-import { Payment } from '../data/seed';
+import { StatusBadge } from '../components/shared/StatusBadge';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/ToastContext';
-import { StatusCard } from '../components/StatusCard';
+import { KpiCard } from '../components/shared/KpiCard';
 import { Button } from '../components/Buttons';
 import { Card } from '../components/Card';
 import { CalendarPicker } from '../components/FormModals';
-import { AuditLog } from '../data/seed';
-import { useAppData } from '../context/AppDataContext';
 import { TableContainer } from '../components/TableContainer';
 import { RecordHistoryModal } from '../components/RecordHistoryModal';
 import { ClientInfoCard } from '../components/ClientInfoCard';
-import api from '../services/api';
 import { InvoiceDocument } from '../components/InvoiceDocument';
+import { useQuery } from '../hooks/useQuery';
+import { paymentsService } from '../services/paymentsService';
+import { invoicesService } from '../services/invoicesService';
+import { clientsService } from '../services/clientsService';
+import { waybillsService } from '../services/waybillsService';
+import { speedpayService } from '../services/speedpayService';
+import { cashFlowService } from '../services/cashFlowService';
+import { auditLogsService } from '../services/auditLogsService';
+import { duplicatesService } from '../services/duplicates.service';
+import type { Payment, AuditLog, Invoice, Client, SpeedPaySubmission, Waybill, CashFlowRecord, Receipt } from '../types/entities';
 
-const getEmployeeName = (id: string, def: string) => {
-  if (id === 'EMP-001') return 'Crystalyn Joyce C. Fajardo';
-  if (id === 'EMP-002') return 'Misty';
-  if (id === 'EMP-003') return 'Maria Mariel Jane Anonuevo';
-
-  if (id === 'EMP-004') return 'Joana Marie Ogaya';
-  if (id === 'SYSTEM') return 'System';
-  return (def === 'System' || !def) ? 'Crystalyn Joyce C. Fajardo' : def;
+const getEmployeeName = (id?: string, def?: string) => {
+  return def || id || 'System';
 };
 
 const safeFormatDate = (dateVal: string | Date | undefined | null, options?: Intl.DateTimeFormatOptions) => {
@@ -104,10 +104,10 @@ const PaymentsContent: React.FC = () => {
   const actionParam = searchParams.get('action') || 'view';
   const paymentIdParam = searchParams.get('paymentId');
 
-  const isFinanceManager = user?.role === 'Finance Manager';
-  const isAssistant = user?.role === 'Assistant of Finance Manager';
-  const isHeadAccountant = user?.role === 'Head Accountant';
-  const isAccountant = user?.role === 'Accountant';
+  const isFinanceManager = user?.role === 'FINANCIAL_MANAGER';
+  const isAssistant = user?.role === 'ASSISTANT_FM';
+  const isHeadAccountant = user?.role === 'HEAD_ACCOUNTANT';
+  const isAccountant = user?.role === 'ACCOUNTANT';
 
   const [showForm, setShowForm] = useState(false);
   const [showExpenseForm, setShowExpenseForm] = useState(false);
@@ -181,41 +181,38 @@ const PaymentsContent: React.FC = () => {
     else if (e.type === "dragleave") setDragActive(false);
   };
 
-  const processSelectedFile = (file: File) => {
+  const processSelectedFile = async (file: File) => {
     setUploadFile(file);
     setPreviewDocUrl(URL.createObjectURL(file));
     setCheckingStep(1);
     setCheckingProgress(25);
     setScanResultMode('NONE');
 
-    setTimeout(() => {
+    try {
       setCheckingStep(2);
       setCheckingProgress(60);
-      
-      setTimeout(() => {
-        setCheckingStep(0);
-        setCheckingProgress(100);
-        
-        const lowerName = file.name.toLowerCase();
-        if (lowerName.includes('invalid') || lowerName.includes('error')) {
-          setScanResultMode('INVALID');
-          setOcrWarning('Only official receipts, invoices, billing statements, or payment-related finance documents are allowed.');
-        } else {
-          // TEMPORARY: Always trigger DUPLICATE for testing purposes based on user request
-          setScanResultMode('DUPLICATE');
-          setSimilarityScore(100);
-          setMatchedRecordDetails({
-             record_id: 'FOMS-PAY-99812',
-             registered_or: form.invoiceNo || 'MOCK-OR-12345',
-             client_name: form.companyName || 'SPEEDEX USER',
-             amount: form.amount || '0.00',
-             entry_date: form.datePaid || '2026-09-15',
-             reference_no: form.referenceNumber || 'MOCK-REF-9876'
-          });
-          toast.warning('Duplicate detected (100% similarity). Review required.', 'AI Gemini Scan');
-        }
-      }, 1200);
-    }, 800);
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await duplicatesService.scan(formData) as any;
+      setCheckingStep(0);
+      setCheckingProgress(100);
+
+      if (res?.isDuplicate) {
+        setScanResultMode('DUPLICATE');
+        setSimilarityScore(res.similarityScore || 95);
+        setMatchedRecordDetails(res.matchedRecord || null);
+        toast.warning('Duplicate detected. Review required.', 'AI Scan');
+      } else if (res?.isInvalid) {
+        setScanResultMode('INVALID');
+        setOcrWarning(res.warning || 'Only official receipts or invoices are allowed.');
+      } else {
+        setScanResultMode('CLEAR');
+      }
+    } catch {
+      setCheckingStep(0);
+      setCheckingProgress(100);
+      setScanResultMode('CLEAR');
+    }
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -258,38 +255,72 @@ const PaymentsContent: React.FC = () => {
     toast.success(`Expense "${newExpense.description}" recorded — ₱${newExpense.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`, 'Expense Recorded');
   };
 
-  const { payments, invoices, waybills, speedPay, clients, updatePayment, addPayment, updateInvoice, addReceipt, receipts, refreshPayments, refreshInvoices, refreshReceipts, addAuditLog, addCashFlowRecord, cashFlowRecords } = useAppData();
+  const { data: paymentsData, refetch: refreshPayments } = useQuery('payments', () => paymentsService.list({ pageSize: 100 }));
+  const { data: invoicesData, refetch: refreshInvoices } = useQuery('invoices', () => invoicesService.list({ pageSize: 100 }));
+  const { data: waybillsData } = useQuery('waybills', () => waybillsService.list({ pageSize: 100 }));
+  const { data: speedPayData } = useQuery('speedPay', () => speedpayService.list({ pageSize: 100 }));
+  const { data: clientsData } = useQuery('clients', () => clientsService.list({ pageSize: 100 }));
+  const { data: receiptsData, refetch: refreshReceipts } = useQuery('receipts', () => paymentsService.receipts.list({ pageSize: 100 }));
+  const { data: cashFlowData } = useQuery('cashFlow', () => cashFlowService.list({ pageSize: 100 }));
 
-  // All roles see all payments — filtering by status was hiding history
-  // Accountants see all; FM/HA/Assistant see all (they validate/approve from this list)
+  const payments: Payment[] = paymentsData?.items || [];
+  const invoices: Invoice[] = invoicesData?.items || [];
+  const waybills: Waybill[] = waybillsData?.items || [];
+  const speedPay: SpeedPaySubmission[] = speedPayData?.items || [];
+  const clients: Client[] = clientsData?.items || [];
+  const receipts: Receipt[] = receiptsData?.items || [];
+  const cashFlowRecords: CashFlowRecord[] = cashFlowData?.items || [];
+
+  const updatePayment = async (id: string, data: Partial<Payment>) => {
+    await paymentsService.update(id, data);
+    refreshPayments();
+  };
+  const addPayment = async (data: Partial<Payment>) => {
+    await paymentsService.create(data);
+    refreshPayments();
+  };
+  const updateInvoice = async (id: string, data: Partial<Invoice>) => {
+    await invoicesService.update(id, data);
+    refreshInvoices();
+  };
+  const addReceipt = async (data: Partial<Receipt>) => {
+    await paymentsService.receipts.create(data);
+    refreshReceipts();
+  };
+  const addAuditLog = (data: Partial<AuditLog>) => {
+    auditLogsService.create(data).catch(() => {});
+  };
+  const addCashFlowRecord = (data: Partial<CashFlowRecord>) => {
+    cashFlowService.create(data).catch(() => {});
+  };
+
   const allowedPayments = payments;
 
-  const filteredPayments = clientIdParam ? allowedPayments.filter(p => p.clientId === clientIdParam) : allowedPayments;
+  const filteredPayments = clientIdParam ? allowedPayments.filter((p: Payment) => p.clientId === clientIdParam) : allowedPayments;
 
-  const totalVerified = useMemo(() => filteredPayments.filter(p => p.status === 'Validated' || p.status === 'Approved').reduce((s, p) => s + p.amount, 0), [filteredPayments]);
-  const filteredSpeedPay = clientIdParam ? speedPay.filter(s => {
-    const invoice = invoices.find(i => i.id === s.invoiceId);
+  const totalVerified = useMemo(() => filteredPayments.filter((p: Payment) => p.status === 'Validated' || p.status === 'Approved').reduce((s: number, p: Payment) => s + p.amount, 0), [filteredPayments]);
+  const filteredSpeedPay = clientIdParam ? speedPay.filter((s: SpeedPaySubmission) => {
+    const invoice = invoices.find((i: Invoice) => i.id === s.invoiceId);
     return invoice?.clientId === clientIdParam;
   }) : speedPay;
-  const pendingSpeedPay = filteredSpeedPay.filter(s => s.status === 'Pending Validation').length;
-  const pendingFinal = useMemo(() => filteredPayments.filter(p => p.status === 'Validated').length, [filteredPayments]);
-  const checkCount = useMemo(() => filteredPayments.filter(p => p.paymentMethod === 'Check').length, [filteredPayments]);
-  const obtCount = useMemo(() => filteredPayments.filter(p => p.paymentMethod === 'Online Bank Transfer').length, [filteredPayments]);
+  const pendingSpeedPay = filteredSpeedPay.filter((s: SpeedPaySubmission) => s.status === 'Pending Validation').length;
+  const pendingFinal = useMemo(() => filteredPayments.filter((p: Payment) => p.status === 'Validated').length, [filteredPayments]);
+  const checkCount = useMemo(() => filteredPayments.filter((p: Payment) => p.paymentMethod === 'Check').length, [filteredPayments]);
+  const obtCount = useMemo(() => filteredPayments.filter((p: Payment) => p.paymentMethod === 'Online Bank Transfer').length, [filteredPayments]);
 
-  // Only show invoices that still have outstanding balance (exclude Paid)
-  const unpaidInvoices = invoices.filter(i => ['Sent', 'Overdue'].includes(i.status));
+  const unpaidInvoices = invoices.filter((i: Invoice) => ['Sent', 'Overdue'].includes(i.status));
 
   let enriched: any[] = [];
   if (clientIdParam) {
-    enriched = allowedPayments.filter(p => p.clientId === clientIdParam).map(p => {
-      const client = clients.find(c => c.id === p.clientId);
-      const invoice = invoices.find(i => i.id === p.invoiceId);
+    enriched = allowedPayments.filter((p: Payment) => p.clientId === clientIdParam).map((p: Payment) => {
+      const client = clients.find((c: Client) => c.id === p.clientId);
+      const invoice = invoices.find((i: Invoice) => i.id === p.invoiceId);
       return { ...p, clientName: client?.name ?? 'Unknown', invoiceNumber: invoice?.invoiceNumber ?? p.invoiceId };
     });
   } else {
-    enriched = allowedPayments.map(p => {
-      const client = clients.find(c => c.id === p.clientId);
-      const invoice = invoices.find(i => i.id === p.invoiceId);
+    enriched = allowedPayments.map((p: Payment) => {
+      const client = clients.find((c: Client) => c.id === p.clientId);
+      const invoice = invoices.find((i: Invoice) => i.id === p.invoiceId);
       return {
         ...p,
         clientName: client?.name ?? 'Unknown',
@@ -410,30 +441,26 @@ const PaymentsContent: React.FC = () => {
     const clientFullName = form.companyName || `${form.firstName} ${form.lastName}`.trim() || 'Walk-in Client';
 
     try {
-      const session = JSON.parse(sessionStorage.getItem('foms_session') || '{}');
-      const payload = {
-        InvoiceId: `MANUAL-${form.invoiceNo}`, // mock ID
-        InvoiceNo: form.invoiceNo,
-        ClientId: `MANUAL-CLIENT-${Date.now()}`, // mock ID
-        ClientName: clientFullName,
-        PaymentDate: form.datePaid || new Date().toISOString().split('T')[0],
-        Amount: parsedAmount,
-        PaymentMethod: form.paymentMethod,
-        ReferenceNumber: form.referenceNumber,
-        Remarks: form.notes || 'Recorded via Finance Record Payment',
-        RecordedBy: session?.employeeId ?? user?.employeeId ?? 'System',
-        Status: 'Pending Validation', // Explicitly setting status
+      const targetInvoice = invoices.find((i: Invoice) => i.id === form.invoiceId || i.invoiceNumber === form.invoiceNo);
+      const targetClient = targetInvoice ? clients.find((c: Client) => c.id === targetInvoice.clientId) : undefined;
+      const payload: Partial<Payment> = {
+        invoiceId: targetInvoice?.id || form.invoiceId,
+        clientId: targetClient?.id || targetInvoice?.clientId || '',
+        amount: parsedAmount,
+        paymentMethod: form.paymentMethod as any,
+        referenceNumber: form.referenceNumber,
+        notes: form.notes || 'Recorded via Finance Record Payment',
+        recordedBy: user?.fullName || 'System',
+        status: 'Pending Validation',
+        recordedAt: form.datePaid || new Date().toISOString(),
       };
-      await api.post('/payments', payload);
-      // Refresh from DB — ensures persistence survives refresh/restart
-      await refreshPayments();
+      await addPayment(payload);
       setShowForm(false);
       setForm({ invoiceId: '', invoiceNo: '', companyName: '', firstName: '', lastName: '', amount: '', paymentMethod: 'Bank Transfer', referenceNumber: '', bankConfirmed: false, notes: '', datePaid: '' });
       addAuditLog({
-        id: `AL-${Date.now()}`,
-        userId: user?.employeeId || 'U-000',
+        userId: user?.employeeId || 'System',
         userFullName: user?.fullName || 'System',
-        userRole: user?.role || 'Accountant',
+        userRole: user?.role || 'ACCOUNTANT',
         action: 'RECORD_PAYMENT',
         module: 'Payments',
         recordId: form.invoiceNo,
@@ -460,41 +487,33 @@ const PaymentsContent: React.FC = () => {
     setSubmitted(true);
     try {
       if (verificationStatus === 'Reject') {
-        await api.post(`/finance/payments/${viewPayment.id}/reject`, { RejectionReason: rejectionReason }).catch(() => { });
-        updatePayment(viewPayment.id, { status: 'Rejected' });
-        toast.error(`Payment rejected and saved to database.`, 'Payment Rejected');
+        await updatePayment(viewPayment.id, { status: 'Rejected' });
+        toast.error(`Payment rejected.`, 'Payment Rejected');
       } else {
-        await api.post(`/finance/payments/${viewPayment.id}/validate`, { Remarks: rejectionReason || 'Validated' }).catch(() => { });
-        updatePayment(viewPayment.id, { status: 'Verified' as any, validatedBy: user?.fullName, validatedAt: new Date().toISOString() });
+        await updatePayment(viewPayment.id, { status: 'Validated', validatedBy: user?.fullName, validatedAt: new Date().toISOString() });
 
-        // Auto-mark invoice as Paid if fully covered (TC 170-173)
-        const invoice = invoices.find(i => i.id === viewPayment.invoiceId);
+        const invoice = invoices.find((i: Invoice) => i.id === viewPayment.invoiceId);
         if (invoice) {
-          const previouslyPaid = payments.filter(p => p.invoiceId === invoice.id && ((p.status as string) === 'Verified' || p.status === 'Validated' || p.status === 'Approved') && p.id !== viewPayment.id).reduce((sum, p) => sum + p.amount, 0);
+          const previouslyPaid = payments.filter((p: Payment) => p.invoiceId === invoice.id && (p.status === 'Validated' || p.status === 'Approved') && p.id !== viewPayment.id).reduce((sum: number, p: Payment) => sum + p.amount, 0);
           if (previouslyPaid + viewPayment.amount >= invoice.totalAmount) {
             updateInvoice(invoice.id, { paymentStatus: 'Paid', status: 'Paid' });
           }
         }
         
-        // Auto-record Cash Flow Inflow
         addCashFlowRecord({
-          id: `CFI-${Date.now()}`,
-          date: new Date().toISOString(),
           sourceReference: viewPayment.id,
           type: 'Inflow',
           amount: viewPayment.amount,
-          recordedBy: user?.employeeId || 'System'
+          date: new Date().toISOString(),
+          recordedBy: user?.fullName || 'System'
         });
 
-        toast.success(`Payment validated. Invoice and AR updated. OR generated.`, 'Payment Validated');
+        toast.success(`Payment validated. Invoice and AR updated.`, 'Payment Validated');
       }
-      // Refresh from DB — single source of truth
-      await Promise.all([refreshPayments(), refreshInvoices()]);
       addAuditLog({
-        id: `AL-${Date.now()}`,
-        userId: user?.employeeId || 'U-000',
+        userId: user?.employeeId || 'System',
         userFullName: user?.fullName || 'System',
-        userRole: user?.role || 'Accountant',
+        userRole: user?.role || 'ACCOUNTANT',
         action: 'VALIDATE_PAYMENT',
         module: 'Payments',
         recordId: viewPayment.id,
@@ -521,44 +540,38 @@ const PaymentsContent: React.FC = () => {
     setSubmitted(true);
     try {
       if (approvalStatus === 'Return for Review') {
-        await api.post(`/finance/payments/${viewPayment.id}/return`, { Remarks: rejectionReason }).catch(() => { });
-        updatePayment(viewPayment.id, { status: 'Pending Validation' });
+        await updatePayment(viewPayment.id, { status: 'Pending Validation' });
         toast.info(`Payment returned for correction and saved to database.`, 'Payment Returned');
       } else {
-        // Finance Manager final approval = validate endpoint
-        await api.post(`/finance/payments/${viewPayment.id}/validate`, { Remarks: 'Finance Manager Final Approval' }).catch(() => { });
-        updatePayment(viewPayment.id, { status: 'Approved', validatedBy: user?.fullName, validatedAt: new Date().toISOString() });
+        await updatePayment(viewPayment.id, { status: 'Approved', validatedBy: user?.fullName, validatedAt: new Date().toISOString() });
 
-        // Auto-mark invoice as Paid if fully covered (TC 170-173)
-        const invoice = invoices.find(i => i.id === viewPayment.invoiceId);
+        // Auto-mark invoice as Paid if fully covered
+        const invoice = invoices.find((i: Invoice) => i.id === viewPayment.invoiceId);
         if (invoice) {
-          const previouslyPaid = payments.filter(p => p.invoiceId === invoice.id && (p.status === 'Validated' || p.status === 'Approved') && p.id !== viewPayment.id).reduce((sum, p) => sum + p.amount, 0);
+          const previouslyPaid = payments.filter((p: Payment) => p.invoiceId === invoice.id && (p.status === 'Validated' || p.status === 'Approved') && p.id !== viewPayment.id).reduce((sum: number, p: Payment) => sum + p.amount, 0);
           if (previouslyPaid + viewPayment.amount >= invoice.totalAmount) {
             updateInvoice(invoice.id, { paymentStatus: 'Paid', status: 'Paid' });
           }
         }
         
         // Auto-record Cash Flow Inflow if not already recorded
-        const isRecorded = cashFlowRecords?.some((c: any) => c.sourceReference === viewPayment.id);
+        const isRecorded = cashFlowRecords?.some((c: CashFlowRecord) => c.sourceReference === viewPayment.id);
         if (!isRecorded) {
           addCashFlowRecord({
-            id: `CFI-${Date.now()}`,
-            date: new Date().toISOString(),
             sourceReference: viewPayment.id,
             type: 'Inflow',
             amount: viewPayment.amount,
-            recordedBy: user?.employeeId || 'System'
+            date: new Date().toISOString(),
+            recordedBy: user?.fullName || 'System'
           });
         }
 
         toast.success(`Payment approved. Invoice = Paid. AR updated. OR generated.`, 'Payment Approved');
       }
-      await Promise.all([refreshPayments(), refreshInvoices(), refreshReceipts()]);
       addAuditLog({
-        id: `AL-${Date.now()}`,
-        userId: user?.employeeId || 'U-000',
+        userId: user?.employeeId || 'System',
         userFullName: user?.fullName || 'System',
-        userRole: user?.role || 'Accountant',
+        userRole: user?.role || 'FINANCIAL_MANAGER',
         action: 'APPROVE_PAYMENT',
         module: 'Payments',
         recordId: viewPayment.id,
@@ -579,10 +592,10 @@ const PaymentsContent: React.FC = () => {
   // --- Detail Views logic is now at the bottom of the file as modals ---
   let viewPayment: any = null;
   if (paymentIdParam) {
-    let viewPaymentRaw: any = allowedPayments.find(p => p.id === paymentIdParam);
+    let viewPaymentRaw: any = allowedPayments.find((p: Payment) => p.id === paymentIdParam);
     if (!viewPaymentRaw && paymentIdParam.startsWith('SP-')) {
       const spId = paymentIdParam.replace('SP-', '');
-      const sp = speedPay.find(s => s.id === spId);
+      const sp = speedPay.find((s: SpeedPaySubmission) => s.id === spId);
       if (sp) {
         viewPaymentRaw = {
           ...sp,
@@ -595,8 +608,8 @@ const PaymentsContent: React.FC = () => {
     }
 
     if (viewPaymentRaw) {
-      const client = clients.find(c => c.id === viewPaymentRaw.clientId);
-      const invoice = invoices.find(i => i.id === viewPaymentRaw.invoiceId);
+      const client = clients.find((c: Client) => c.id === viewPaymentRaw.clientId);
+      const invoice = invoices.find((i: Invoice) => i.id === viewPaymentRaw.invoiceId);
       viewPayment = {
         ...viewPaymentRaw,
         clientName: client?.name ?? viewPaymentRaw.clientName ?? 'Unknown',
@@ -605,10 +618,9 @@ const PaymentsContent: React.FC = () => {
     }
   }
 
-
   // --- Client Detail View ---
   if (clientIdParam) {
-    const client = clients.find(c => c.id === clientIdParam);
+    const client = clients.find((c: Client) => c.id === clientIdParam);
     if (!client) return <div>Client not found</div>;
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -798,13 +810,21 @@ const PaymentsContent: React.FC = () => {
                           <div style={{ padding: '16px', background: '#F8FAFC', borderRadius: '12px', border: '1px solid #E2E8F0', textAlign: 'center' }}>
                             <h4 style={{ margin: '0 0 12px', fontSize: '12.5px', fontWeight: 700, color: '#334155', textTransform: 'uppercase' }}>Uploaded / Scanned Document</h4>
                             <div style={{ overflow: 'hidden', height: '180px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#ffffff', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
-                              <img src={previewDocUrl || '/mock_receipt.png'} alt="Uploaded candidate preview" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
+                              {previewDocUrl ? (
+                                <img src={previewDocUrl} alt="Uploaded candidate preview" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
+                              ) : (
+                                <i className="ti ti-file-text" style={{ fontSize: '3rem', color: '#94A3B8' }} />
+                              )}
                             </div>
                           </div>
                           <div style={{ padding: '16px', background: '#ffffff', borderRadius: '12px', border: '1px solid #E2E8F0', textAlign: 'center' }}>
                             <h4 style={{ margin: '0 0 12px', fontSize: '12.5px', fontWeight: 700, color: '#334155', textTransform: 'uppercase' }}>Existing Matching FOMS Record</h4>
                             <div style={{ overflow: 'hidden', height: '180px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
-                              <img src={'/mock_receipt.png'} alt="Existing database match preview" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain', opacity: 0.85 }} />
+                              {matchedRecordDetails?.proofUrl ? (
+                                <img src={matchedRecordDetails.proofUrl} alt="Existing database match preview" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain', opacity: 0.85 }} />
+                              ) : (
+                                <i className="ti ti-file-check" style={{ fontSize: '3rem', color: '#94A3B8' }} />
+                              )}
                             </div>
                           </div>
                         </div>
@@ -836,9 +856,9 @@ const PaymentsContent: React.FC = () => {
                               </tr>
                               <tr style={{ borderBottom: '1px solid #E2E8F0' }}>
                                 <td style={{ padding: '12px 14px', fontSize: '13px', fontWeight: 600 }}>OR / Invoice Number</td>
-                                <td style={{ padding: '12px 14px', fontSize: '13px', fontFamily: 'monospace' }}>{form.referenceNumber || 'MOCK-OR-12345'}</td>
+                                <td style={{ padding: '12px 14px', fontSize: '13px', fontFamily: 'monospace' }}>{form.referenceNumber || '—'}</td>
                                 <td style={{ padding: '12px 14px', fontSize: '13px', fontFamily: 'monospace' }}>{matchedRecordDetails?.registered_or}</td>
-                                <td style={{ padding: '12px 14px' }}><span style={getCellMatchStyle('docNum', form.referenceNumber || 'MOCK-OR-12345', matchedRecordDetails?.registered_or).style}>{getCellMatchStyle('docNum', form.referenceNumber || 'MOCK-OR-12345', matchedRecordDetails?.registered_or).text}</span></td>
+                                <td style={{ padding: '12px 14px' }}><span style={getCellMatchStyle('docNum', form.referenceNumber || '—', matchedRecordDetails?.registered_or).style}>{getCellMatchStyle('docNum', form.referenceNumber || '—', matchedRecordDetails?.registered_or).text}</span></td>
                               </tr>
                               <tr style={{ borderBottom: '1px solid #E2E8F0' }}>
                                 <td style={{ padding: '12px 14px', fontSize: '13px', fontWeight: 600 }}>Client Name</td>
@@ -918,13 +938,13 @@ const PaymentsContent: React.FC = () => {
   }
 
   // --- List View — Cash Flow Table ---
-  // Only VALIDATED payments count as confirmed cash inflows (test case: pending/rejected are excluded)
-  const validatedPayments = payments.filter(p => p.status === 'Validated' || p.status === 'Approved');
-  const pendingPayments = payments.filter(p => p.status === 'Pending Validation');
+  // Only VALIDATED payments count as confirmed cash inflows
+  const validatedPayments = payments.filter((p: Payment) => p.status === 'Validated' || p.status === 'Approved');
+  const pendingPayments = payments.filter((p: Payment) => p.status === 'Pending Validation');
 
-  const cashFlowRows = validatedPayments.map(p => {
-    const cli = clients.find(c => c.id === p.clientId);
-    const invoice = invoices.find(i => i.id === p.invoiceId);
+  const cashFlowRows = validatedPayments.map((p: Payment) => {
+    const cli = clients.find((c: Client) => c.id === p.clientId);
+    const invoice = invoices.find((i: Invoice) => i.id === p.invoiceId);
     return {
       ...p,
       clientName: (p as any).clientName || cli?.name || p.clientId || '—',
@@ -936,10 +956,10 @@ const PaymentsContent: React.FC = () => {
 
   // Validated SpeedPay submissions as inflow rows
   const speedPayRows = speedPay
-    .filter(s => s.status === 'Validated')
-    .map(s => {
-      const invoice = invoices.find(i => i.id === s.invoiceId);
-      const cli = clients.find(c => c.id === (s as any).clientId);
+    .filter((s: SpeedPaySubmission) => s.status === 'Validated')
+    .map((s: SpeedPaySubmission) => {
+      const invoice = invoices.find((i: Invoice) => i.id === s.invoiceId);
+      const cli = clients.find((c: Client) => c.id === (s as any).clientId);
       return {
         id: `SP-${s.id}`,
         clientId: (s as any).clientId ?? '',
@@ -978,12 +998,12 @@ const PaymentsContent: React.FC = () => {
 
   const totalInflow = allCashFlowRows
     .filter(r => r.type === 'Inflow')
-    .reduce((sum, r) => sum + r.amount, 0);
+    .reduce((sum: number, r) => sum + r.amount, 0);
 
-  const totalOutflow = expenses.reduce((sum, e) => sum + e.amount, 0);
+  const totalOutflow = expenses.reduce((sum: number, e) => sum + e.amount, 0);
   const netCashFlow = totalInflow - totalOutflow;
 
-  const pendingInflowAmt = pendingPayments.reduce((s, p) => s + p.amount, 0);
+  const pendingInflowAmt = pendingPayments.reduce((s: number, p: Payment) => s + p.amount, 0);
 
   const filteredCashFlow = allCashFlowRows.filter(r => {
     if (filterType !== 'All' && r.type !== filterType) return false;
@@ -1221,52 +1241,60 @@ const PaymentsContent: React.FC = () => {
                       </div>
 
                       {/* Document Previews side-by-side */}
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
-                        <div style={{ padding: '16px', background: '#F8FAFC', borderRadius: '12px', border: '1px solid #E2E8F0', textAlign: 'center' }}>
-                          <h4 style={{ margin: '0 0 12px', fontSize: '12.5px', fontWeight: 700, color: '#334155', textTransform: 'uppercase' }}>Uploaded / Scanned Document</h4>
-                          <div style={{ overflow: 'hidden', height: '180px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#ffffff', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
-                            <img src={previewDocUrl || '/mock_receipt.png'} alt="Uploaded candidate preview" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
+                          <div style={{ padding: '16px', background: '#F8FAFC', borderRadius: '12px', border: '1px solid #E2E8F0', textAlign: 'center' }}>
+                            <h4 style={{ margin: '0 0 12px', fontSize: '12.5px', fontWeight: 700, color: '#334155', textTransform: 'uppercase' }}>Uploaded / Scanned Document</h4>
+                            <div style={{ overflow: 'hidden', height: '180px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#ffffff', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                              {previewDocUrl ? (
+                                <img src={previewDocUrl} alt="Uploaded candidate preview" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
+                              ) : (
+                                <i className="ti ti-file-text" style={{ fontSize: '3rem', color: '#94A3B8' }} />
+                              )}
+                            </div>
+                          </div>
+                          <div style={{ padding: '16px', background: '#ffffff', borderRadius: '12px', border: '1px solid #E2E8F0', textAlign: 'center' }}>
+                            <h4 style={{ margin: '0 0 12px', fontSize: '12.5px', fontWeight: 700, color: '#334155', textTransform: 'uppercase' }}>Existing Matching FOMS Record</h4>
+                            <div style={{ overflow: 'hidden', height: '180px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                              {matchedRecordDetails?.proofUrl ? (
+                                <img src={matchedRecordDetails.proofUrl} alt="Existing database match preview" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain', opacity: 0.85 }} />
+                              ) : (
+                                <i className="ti ti-file-check" style={{ fontSize: '3rem', color: '#94A3B8' }} />
+                              )}
+                            </div>
                           </div>
                         </div>
-                        <div style={{ padding: '16px', background: '#ffffff', borderRadius: '12px', border: '1px solid #E2E8F0', textAlign: 'center' }}>
-                          <h4 style={{ margin: '0 0 12px', fontSize: '12.5px', fontWeight: 700, color: '#334155', textTransform: 'uppercase' }}>Existing Matching FOMS Record</h4>
-                          <div style={{ overflow: 'hidden', height: '180px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
-                            <img src={'/mock_receipt.png'} alt="Existing database match preview" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain', opacity: 0.85 }} />
-                          </div>
+
+                        {/* Similarity Banner info */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 18px', background: '#FFF7ED', borderRadius: '8px', border: '1px solid rgba(249, 115, 22, 0.2)', marginBottom: '24px', fontSize: '13.5px', fontWeight: 600 }}>
+                          <span style={{ color: '#9A3412' }}>Highest Similarity: {similarityScore}% Match Score</span>
+                          <span style={{ color: '#334155' }}>Checked Date & Time: {new Date().toLocaleString()}</span>
                         </div>
-                      </div>
 
-                      {/* Similarity Banner info */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 18px', background: '#FFF7ED', borderRadius: '8px', border: '1px solid rgba(249, 115, 22, 0.2)', marginBottom: '24px', fontSize: '13.5px', fontWeight: 600 }}>
-                        <span style={{ color: '#9A3412' }}>Highest Similarity: {similarityScore}% Match Score</span>
-                        <span style={{ color: '#334155' }}>Checked Date & Time: {new Date().toLocaleString()}</span>
-                      </div>
-
-                      {/* Comparison Matrix */}
-                      <h4 style={{ fontSize: '14px', fontWeight: 700, marginBottom: '12px', color: '#0F172A' }}>Comparison Parameters Matrix</h4>
-                      <div style={{ overflowX: 'auto', marginBottom: '28px' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-                          <thead>
-                            <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
-                              <th style={{ padding: '10px 14px', fontSize: '12px', fontWeight: 700, color: '#334155', textTransform: 'uppercase' }}>Field</th>
-                              <th style={{ padding: '10px 14px', fontSize: '12px', fontWeight: 700, color: '#334155', textTransform: 'uppercase' }}>Uploaded Document</th>
-                              <th style={{ padding: '10px 14px', fontSize: '12px', fontWeight: 700, color: '#334155', textTransform: 'uppercase' }}>Existing FOMS Record</th>
-                              <th style={{ padding: '10px 14px', fontSize: '12px', fontWeight: 700, color: '#334155', textTransform: 'uppercase' }}>Match Result</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <tr style={{ borderBottom: '1px solid #E2E8F0' }}>
-                              <td style={{ padding: '12px 14px', fontSize: '13px', fontWeight: 600 }}>Document Type</td>
-                              <td style={{ padding: '12px 14px', fontSize: '13px' }}>OFFICIAL RECEIPT</td>
-                              <td style={{ padding: '12px 14px', fontSize: '13px' }}>Official Receipt</td>
-                              <td style={{ padding: '12px 14px' }}><span style={getCellMatchStyle('type', 'OFFICIAL_RECEIPT', 'OFFICIAL_RECEIPT').style}>{getCellMatchStyle('type', 'OFFICIAL_RECEIPT', 'OFFICIAL_RECEIPT').text}</span></td>
-                            </tr>
-                            <tr style={{ borderBottom: '1px solid #E2E8F0' }}>
-                              <td style={{ padding: '12px 14px', fontSize: '13px', fontWeight: 600 }}>OR / Invoice Number</td>
-                              <td style={{ padding: '12px 14px', fontSize: '13px', fontFamily: 'monospace' }}>{form.referenceNumber || 'MOCK-OR-12345'}</td>
-                              <td style={{ padding: '12px 14px', fontSize: '13px', fontFamily: 'monospace' }}>{matchedRecordDetails?.registered_or}</td>
-                              <td style={{ padding: '12px 14px' }}><span style={getCellMatchStyle('docNum', form.referenceNumber || 'MOCK-OR-12345', matchedRecordDetails?.registered_or).style}>{getCellMatchStyle('docNum', form.referenceNumber || 'MOCK-OR-12345', matchedRecordDetails?.registered_or).text}</span></td>
-                            </tr>
+                        {/* Comparison Matrix */}
+                        <h4 style={{ fontSize: '14px', fontWeight: 700, marginBottom: '12px', color: '#0F172A' }}>Comparison Parameters Matrix</h4>
+                        <div style={{ overflowX: 'auto', marginBottom: '28px' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                            <thead>
+                              <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
+                                <th style={{ padding: '10px 14px', fontSize: '12px', fontWeight: 700, color: '#334155', textTransform: 'uppercase' }}>Field</th>
+                                <th style={{ padding: '10px 14px', fontSize: '12px', fontWeight: 700, color: '#334155', textTransform: 'uppercase' }}>Uploaded Document</th>
+                                <th style={{ padding: '10px 14px', fontSize: '12px', fontWeight: 700, color: '#334155', textTransform: 'uppercase' }}>Existing FOMS Record</th>
+                                <th style={{ padding: '10px 14px', fontSize: '12px', fontWeight: 700, color: '#334155', textTransform: 'uppercase' }}>Match Result</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr style={{ borderBottom: '1px solid #E2E8F0' }}>
+                                <td style={{ padding: '12px 14px', fontSize: '13px', fontWeight: 600 }}>Document Type</td>
+                                <td style={{ padding: '12px 14px', fontSize: '13px' }}>OFFICIAL RECEIPT</td>
+                                <td style={{ padding: '12px 14px', fontSize: '13px' }}>Official Receipt</td>
+                                <td style={{ padding: '12px 14px' }}><span style={getCellMatchStyle('type', 'OFFICIAL_RECEIPT', 'OFFICIAL_RECEIPT').style}>{getCellMatchStyle('type', 'OFFICIAL_RECEIPT', 'OFFICIAL_RECEIPT').text}</span></td>
+                              </tr>
+                              <tr style={{ borderBottom: '1px solid #E2E8F0' }}>
+                                <td style={{ padding: '12px 14px', fontSize: '13px', fontWeight: 600 }}>OR / Invoice Number</td>
+                                <td style={{ padding: '12px 14px', fontSize: '13px', fontFamily: 'monospace' }}>{form.referenceNumber || '—'}</td>
+                                <td style={{ padding: '12px 14px', fontSize: '13px', fontFamily: 'monospace' }}>{matchedRecordDetails?.registered_or}</td>
+                                <td style={{ padding: '12px 14px' }}><span style={getCellMatchStyle('docNum', form.referenceNumber || '—', matchedRecordDetails?.registered_or).style}>{getCellMatchStyle('docNum', form.referenceNumber || '—', matchedRecordDetails?.registered_or).text}</span></td>
+                              </tr>
                             <tr style={{ borderBottom: '1px solid #E2E8F0' }}>
                               <td style={{ padding: '12px 14px', fontSize: '13px', fontWeight: 600 }}>Client Name</td>
                               <td style={{ padding: '12px 14px', fontSize: '13px' }}>{form.companyName || form.firstName || 'SPEEDEX USER'}</td>
@@ -1519,7 +1547,7 @@ const PaymentsContent: React.FC = () => {
               <Info size={18} style={{ color: '#D97706', marginTop: '2px', flexShrink: 0 }} />
               <div>
                 <h5 style={{ margin: '0 0 4px', fontSize: '13.5px', fontWeight: 700, color: '#92400E' }}>Matching Factors Confidence: {similarityScore}%</h5>
-                <p style={{ margin: 0, fontSize: '13px', color: '#B45309', lineHeight: '1.4' }}>Highly similar {matchedRecordDetails?.registered_or ? 'receipt' : 'invoice'} numbers: {form.referenceNumber || 'MOCK-OR-12345'} and {matchedRecordDetails?.registered_or || matchedRecordDetails?.registered_invoice}.</p>
+                <p style={{ margin: 0, fontSize: '13px', color: '#B45309', lineHeight: '1.4' }}>Highly similar {matchedRecordDetails?.registered_or ? 'receipt' : 'invoice'} numbers: {form.referenceNumber || '—'} and {matchedRecordDetails?.registered_or || matchedRecordDetails?.registered_invoice || '—'}.</p>
               </div>
             </div>
 
@@ -1534,10 +1562,18 @@ const PaymentsContent: React.FC = () => {
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
               <div style={{ overflow: 'hidden', height: '140px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
-                <img src={previewDocUrl || '/mock_receipt.png'} alt="Uploaded original doc" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain', transform: `scale(${previewZoom})`, transition: 'transform 0.15s ease' }} />
+                {previewDocUrl ? (
+                  <img src={previewDocUrl} alt="Uploaded original doc" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain', transform: `scale(${previewZoom})`, transition: 'transform 0.15s ease' }} />
+                ) : (
+                  <i className="ti ti-file-text" style={{ fontSize: '2.5rem', color: '#94A3B8' }} />
+                )}
               </div>
               <div style={{ overflow: 'hidden', height: '140px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
-                <img src={'/mock_receipt.png'} alt="Legar FOMS match doc" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain', opacity: 0.85, transform: `scale(${previewZoom})`, transition: 'transform 0.15s ease' }} />
+                {matchedRecordDetails?.proofUrl ? (
+                  <img src={matchedRecordDetails.proofUrl} alt="Existing match doc" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain', opacity: 0.85, transform: `scale(${previewZoom})`, transition: 'transform 0.15s ease' }} />
+                ) : (
+                  <i className="ti ti-file-check" style={{ fontSize: '2.5rem', color: '#94A3B8' }} />
+                )}
               </div>
             </div>
 
@@ -1551,19 +1587,15 @@ const PaymentsContent: React.FC = () => {
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #F1F5F9', fontSize: '13px' }}>
                     <span style={{ color: '#64748B' }}>dueDate</span>
-                    <span style={{ color: '#0D9488', fontWeight: 700 }}>{form.datePaid || '2026-09-15'}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #F1F5F9', fontSize: '13px' }}>
-                    <span style={{ color: '#64748B' }}>clientId</span>
-                    <span style={{ color: '#0D9488', fontWeight: 700 }}>C-004</span>
+                    <span style={{ color: '#0D9488', fontWeight: 700 }}>{form.datePaid || '—'}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #F1F5F9', fontSize: '13px' }}>
                     <span style={{ color: '#64748B' }}>clientName</span>
-                    <span style={{ color: '#0D9488', fontWeight: 700 }}>{form.companyName || form.firstName || 'SPEEDEX USER'}</span>
+                    <span style={{ color: '#0D9488', fontWeight: 700 }}>{form.companyName || form.firstName || 'Client'}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #F1F5F9', fontSize: '13px' }}>
                     <span style={{ color: '#64748B' }}>invoiceNumber</span>
-                    <span style={{ color: '#0D9488', fontWeight: 700 }}>{form.referenceNumber || 'MOCK-OR-12345'}</span>
+                    <span style={{ color: '#0D9488', fontWeight: 700 }}>{form.referenceNumber || '—'}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #F1F5F9', fontSize: '13px' }}>
                     <span style={{ color: '#64748B' }}>paymentStatus</span>
@@ -1581,19 +1613,15 @@ const PaymentsContent: React.FC = () => {
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #F1F5F9', fontSize: '13px' }}>
                     <span style={{ color: '#64748B' }}>dueDate</span>
-                    <span style={{ color: '#0D9488', fontWeight: 700 }}>{matchedRecordDetails?.entry_date || '2026-09-15'}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #F1F5F9', fontSize: '13px' }}>
-                    <span style={{ color: '#64748B' }}>clientId</span>
-                    <span style={{ color: '#0D9488', fontWeight: 700 }}>C-005</span>
+                    <span style={{ color: '#0D9488', fontWeight: 700 }}>{matchedRecordDetails?.entry_date || '—'}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #F1F5F9', fontSize: '13px' }}>
                     <span style={{ color: '#64748B' }}>clientName</span>
-                    <span style={{ color: '#0D9488', fontWeight: 700 }}>{matchedRecordDetails?.client_name || 'Epsilon Corp'}</span>
+                    <span style={{ color: '#0D9488', fontWeight: 700 }}>{matchedRecordDetails?.client_name || 'Client'}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #F1F5F9', fontSize: '13px' }}>
                     <span style={{ color: '#64748B' }}>invoiceNumber</span>
-                    <span style={{ color: '#0D9488', fontWeight: 700 }}>{matchedRecordDetails?.registered_or || matchedRecordDetails?.registered_invoice || 'INV-2026-005'}</span>
+                    <span style={{ color: '#0D9488', fontWeight: 700 }}>{matchedRecordDetails?.registered_or || matchedRecordDetails?.registered_invoice || '—'}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #F1F5F9', fontSize: '13px' }}>
                     <span style={{ color: '#64748B' }}>paymentStatus</span>
@@ -1741,27 +1769,11 @@ const PaymentsContent: React.FC = () => {
                     icon="ti-file-invoice"
                     style={{ background: '#ffffff', color: '#475569', borderColor: '#E2E8F0' }}
                     onClick={() => {
-                      const found = invoices.find(i => i.id === viewPayment.invoiceId || i.invoiceNumber === viewPayment.invoiceId || i.invoiceNumber === viewPayment.invoiceNumber);
+                      const found = invoices.find((i: Invoice) => i.id === viewPayment.invoiceId || i.invoiceNumber === viewPayment.invoiceId || i.invoiceNumber === viewPayment.invoiceNumber);
                       if (found) {
                         setSelectedInvoiceForModal(found);
                       } else {
-                        const rawAmount = typeof viewPayment.amount === 'string' ? Number(viewPayment.amount.replace(/[^0-9.-]+/g,"")) : (viewPayment.amount || 15000);
-                        const safeAmount = isNaN(rawAmount) || rawAmount === 0 ? 15000 : rawAmount;
-                        setSelectedInvoiceForModal({
-                          id: 'MOCK-INV',
-                          invoiceNumber: viewPayment.invoiceNumber || 'MOCK-0001',
-                          clientId: viewPayment.clientId || 'CL-001',
-                          amount: safeAmount,
-                          vatAmount: safeAmount * 0.12,
-                          surchargeAmount: 0,
-                          totalAmount: safeAmount * 1.12,
-                          status: 'Sent',
-                          billingPeriod: 'Mock Period 2026',
-                          createdAt: new Date().toISOString(),
-                          dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-                          waybillIds: []
-                        });
-                        toast.info('Showing a preview mock invoice because the actual invoice was not found in the database.', 'Mock Invoice', undefined, undefined, 4000);
+                        toast.info('No corresponding invoice record found in the database.');
                       }
                     }}
                   />
@@ -1805,11 +1817,11 @@ const PaymentsContent: React.FC = () => {
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dashed #E2E8F0', paddingBottom: '12px' }}>
                       <span style={{ fontSize: '12.5px', color: '#64748B', fontWeight: 600 }}>Recorded By</span>
-                      <span style={{ fontSize: '13px', color: '#0F172A', fontWeight: 700 }}>{getEmployeeName(viewPayment.recordedBy || 'SYSTEM', 'System')}</span>
+                      <span style={{ fontSize: '13px', color: '#0F172A', fontWeight: 700 }}>{getEmployeeName(viewPayment.recordedBy, 'System')}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dashed #E2E8F0', paddingBottom: '12px' }}>
                       <span style={{ fontSize: '12.5px', color: '#64748B', fontWeight: 600 }}>Verified By</span>
-                      <span style={{ fontSize: '13px', color: '#0F172A', fontWeight: 700 }}>{getEmployeeName(viewPayment.validatedBy || 'EMP-002', 'Misty')}</span>
+                      <span style={{ fontSize: '13px', color: '#0F172A', fontWeight: 700 }}>{getEmployeeName(viewPayment.validatedBy, '—')}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span style={{ fontSize: '12.5px', color: '#64748B', fontWeight: 600 }}>Status</span>
@@ -1929,7 +1941,7 @@ const PaymentsContent: React.FC = () => {
                         </div>
                       </>
                     )}
-                    <div style={{ color: '#64748B', fontSize: '13px', marginTop: '8px' }}>1.1 MB &bull; uploaded by {viewPayment.recordedBy || 'EMP-002'}</div>
+                    <div style={{ color: '#64748B', fontSize: '13px', marginTop: '8px' }}>uploaded by {viewPayment.recordedBy || 'System'}</div>
                   </div>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '24px' }}>

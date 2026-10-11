@@ -6,7 +6,6 @@ import {
   Info, 
   AlertTriangle, 
   CheckCircle2, 
-  Settings, 
   LogOut,
   User,
   ChevronRight,
@@ -18,11 +17,12 @@ import {
 } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { NAV_CONFIG, ROLE_LABELS } from '../data/seed';
+import { ROLE_LABELS, getModuleForPath, moduleLabel } from '../utils/roleAccess';
+import { getInitials } from '../utils/format';
 import './GlobalHeader.css';
 import { Button } from './Buttons';
 
-import { useNotifications, NotificationItem } from '../context/NotificationContext';
+import { useNotifications, type NotificationItem } from '../hooks/useNotifications';
 
 export interface GlobalHeaderProps {}
 
@@ -117,36 +117,20 @@ const GlobalHeader: React.FC<GlobalHeaderProps> = () => {
   const todayNotifications = useMemo(() => sortedFiltered.filter(n => n.isToday), [sortedFiltered]);
   const earlierNotifications = useMemo(() => sortedFiltered.filter(n => !n.isToday), [sortedFiltered]);
 
-  // Derive title and subtitle from active route
-  const currentTitleInfo = useMemo(() => {
-    if (location.pathname.startsWith('/profile')) return { title: 'My Profile', subtitle: 'Settings' };
-    if (!user) return { title: 'Dashboard', subtitle: 'Application' };
-    const userGroups = NAV_CONFIG[user.role]?.groups || [];
-    for (const group of userGroups) {
-      for (const item of group.items) {
-        if (location.pathname.startsWith(item.path)) {
-          return { title: item.label, subtitle: group.label };
-        }
-      }
-    }
-    
-    // Fallbacks for routes not in the sidebar navigation
-    if (location.pathname.startsWith('/invoice-create')) return { title: 'Create Invoice', subtitle: 'Invoicing' };
-    
-    return { title: 'Dashboard', subtitle: 'Overview' };
-  }, [location.pathname, user]);
+  // Derive title and subtitle from the active route via the role-access config
+  const { title: currentTitle, subtitle: currentSubtitle } = useMemo(() => {
+    const m = getModuleForPath(location.pathname);
+    return m ? { title: moduleLabel(m, user?.role), subtitle: m.group } : { title: '', subtitle: '' };
+  }, [location.pathname, user?.role]);
 
-  const { title: currentTitle, subtitle: currentSubtitle } = currentTitleInfo;
-
-  // Derive profile display info
-  const profileName = user?.fullName || 'Guest User';
-  const profileRole = user ? ROLE_LABELS[user.role] : 'Unauthenticated';
-  const profileInitials = profileName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+  // Derive profile display info from the user record
+  const profileName = user?.fullName ?? '';
+  const profileRole = user ? ROLE_LABELS[user.role] : '';
+  const profileInitials = getInitials(profileName);
 
   const isChildRoute = 
     location.pathname.split('/').filter(Boolean).length > 1 || 
-    location.search.length > 0 ||
-    location.pathname.startsWith('/invoice-create');
+    location.search.length > 0;
 
   return (
     <header className="site-header" style={{ position: 'sticky' }}>
@@ -450,17 +434,6 @@ const GlobalHeader: React.FC<GlobalHeaderProps> = () => {
                   >
                     <User size={15} strokeWidth={2} className="option-icon" />
                     <span>My Profile</span>
-                  </button>
-                  
-                  <button 
-                    className="profile-dropdown-option"
-                    onClick={() => {
-                      alert('Settings Panel opened');
-                      setShowProfileMenu(false);
-                    }}
-                  >
-                    <Settings size={15} strokeWidth={2} className="option-icon" />
-                    <span>System Settings</span>
                   </button>
                 </div>
  

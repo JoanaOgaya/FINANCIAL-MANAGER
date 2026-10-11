@@ -2,13 +2,17 @@ import React from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { DataTable } from '../components/DataTable';
 import { useAuth } from '../context/AuthContext';
-import { StatusBadge } from '../components/StatusBadge';
+import { StatusBadge } from '../components/shared/StatusBadge';
 import { Card } from '../components/Card';
 import { Button } from '../components/Buttons';
-import { useAppData } from '../context/AppDataContext';
 import { TableContainer } from '../components/TableContainer';
 import { ClientInfoCard } from '../components/ClientInfoCard';
 import { useToast } from '../components/ToastContext';
+import { useQuery } from '../hooks/useQuery';
+import { paymentsService } from '../services/paymentsService';
+import { clientsService } from '../services/clientsService';
+import { invoicesService } from '../services/invoicesService';
+import type { Receipt, Client, Invoice, Payment } from '../types/entities';
 // @ts-ignore
 import html2pdf from 'html2pdf.js';
 
@@ -20,19 +24,27 @@ export const Receipts: React.FC = () => {
   const { user } = useAuth();
   const { toast } = useToast();
 
-  const { receipts, clients, invoices, payments } = useAppData();
+  const { data: receiptsData } = useQuery('receipts', () => paymentsService.receipts.list({ pageSize: 100 }));
+  const { data: clientsData } = useQuery('clients', () => clientsService.list({ pageSize: 100 }));
+  const { data: invoicesData } = useQuery('invoices', () => invoicesService.list({ pageSize: 100 }));
+  const { data: paymentsData } = useQuery('payments', () => paymentsService.list({ pageSize: 100 }));
+
+  const receipts: Receipt[] = receiptsData?.items || [];
+  const clients: Client[] = clientsData?.items || [];
+  const invoices: Invoice[] = invoicesData?.items || [];
+  const payments: Payment[] = paymentsData?.items || [];
 
   // ─────────────────────────────────────────────────────────────
   // DETAIL VIEW — card form with Print/PDF popup
   // ─────────────────────────────────────────────────────────────
   const renderReceiptModal = () => {
     if (!receiptIdParam) return null;
-    const raw = receipts.find(r => r.id === receiptIdParam);
+    const raw = receipts.find((r: Receipt) => r.id === receiptIdParam);
     if (!raw) return null;
 
-    const client = clients.find(c => c.id === raw.clientId);
-    const invoice = invoices.find(i => i.id === raw.invoiceId);
-    const payment = payments.find(p => p.id === raw.paymentId);
+    const client = clients.find((c: Client) => c.id === raw.clientId);
+    const invoice = invoices.find((i: Invoice) => i.id === raw.invoiceId);
+    const payment = payments.find((p: Payment) => p.id === raw.paymentId);
 
     const or = {
       ...raw,
@@ -409,14 +421,14 @@ export const Receipts: React.FC = () => {
   // CLIENT DETAIL VIEW — OR History table
   // ─────────────────────────────────────────────────────────────
   if (clientIdParam) {
-    const client = clients.find(c => c.id === clientIdParam);
+    const client = clients.find((c: Client) => c.id === clientIdParam);
     if (!client) return <div>Client not found</div>;
 
     const clientReceipts = receipts
-      .filter(r => r.clientId === clientIdParam)
-      .map(r => {
-        const inv = invoices.find(i => i.id === r.invoiceId);
-        const pmt = payments.find(p => p.id === r.paymentId);
+      .filter((r: Receipt) => r.clientId === clientIdParam)
+      .map((r: Receipt) => {
+        const inv = invoices.find((i: Invoice) => i.id === r.invoiceId);
+        const pmt = payments.find((p: Payment) => p.id === r.paymentId);
         return {
           ...r,
           invoiceNumber: inv?.invoiceNumber ?? r.invoiceId,
@@ -440,7 +452,7 @@ export const Receipts: React.FC = () => {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
 
-        <ClientInfoCard client={client} />
+        <ClientInfoCard client={client} onBack={() => navigate('/receipts')} />
 
         <Card>
           <div style={{ padding: '24px' }}>
@@ -466,11 +478,11 @@ export const Receipts: React.FC = () => {
   // LIST VIEW — all clients
   // ─────────────────────────────────────────────────────────────
   const relevantClientIds = new Set<string>();
-  receipts.forEach(r => relevantClientIds.add(r.clientId));
-  (payments as any[]).filter(p => p.status === 'Issued OR').forEach(p => relevantClientIds.add(p.clientId));
+  receipts.forEach((r: Receipt) => relevantClientIds.add(r.clientId));
+  payments.filter((p: Payment) => p.status === 'Approved' || (p.status as string) === 'Issued OR').forEach((p: Payment) => relevantClientIds.add(p.clientId));
 
   const listData = Array.from(relevantClientIds).map(clientId => {
-    const client = clients.find(c => c.id === clientId);
+    const client = clients.find((c: Client) => c.id === clientId);
     return {
       id: clientId,
       clientName: client?.name ?? 'Unknown',

@@ -2,20 +2,26 @@ import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Button from '../components/Buttons';
 import { DataTable } from '../components/DataTable';
-import { BillingRate } from '../data/seed';
 import { TableContainer } from '../components/TableContainer';
 import { ClientInfoCard } from '../components/ClientInfoCard';
 import { Card } from '../components/Card';
 import { useToast } from '../components/ToastContext';
-import { useAppData } from '../context/AppDataContext';
+import { useQuery } from '../hooks/useQuery';
+import { ratesService } from '../services/ratesService';
+import { clientsService } from '../services/clientsService';
+import type { BillingRate, Client } from '../types/entities';
 
 export const RateConfiguration: React.FC = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const selectedClientId = id;
-  const { triggerToast } = useToast();
-  
-  const { clients, billingRates, addBillingRate, updateBillingRate } = useAppData();
+  const { toast } = useToast();
+
+  const { data: ratesData, refetch: refetchRates } = useQuery('rates', () => ratesService.list({ pageSize: 100 }));
+  const { data: clientsData } = useQuery('clients', () => clientsService.list({ pageSize: 100 }));
+
+  const billingRates: BillingRate[] = ratesData?.items || [];
+  const clients: Client[] = clientsData?.items || [];
 
   // Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -25,15 +31,15 @@ export const RateConfiguration: React.FC = () => {
   // Combine Rates with Client Data for the top-level list
   let groupedClients: any[] = [];
   if (!selectedClientId) {
-    groupedClients = clients.map(client => {
-      const clientRates = billingRates.filter(r => r.clientId === client.id && r.status === 'Active');
+    groupedClients = clients.map((client: Client) => {
+      const clientRates = billingRates.filter((r: BillingRate) => r.clientId === client.id && r.status === 'Active');
       return {
         id: client.id,
         clientId: client.id,
         clientName: client.name,
-        configuredAreas: clientRates.length > 0 ? clientRates.map(r => r.region).join(', ') : 'None',
+        configuredAreas: clientRates.length > 0 ? clientRates.map((r: BillingRate) => r.region).join(', ') : 'None',
         vatStatus: client.vatStatus,
-        vatRateDisplay: client.vatRate !== null ? `${(client.vatRate * 100).toFixed(0)}%` : '—',
+        vatRateDisplay: client.vatRate !== null && client.vatRate !== undefined ? `${(client.vatRate * 100).toFixed(0)}%` : '—',
         agreedSchedule: client.billingSchedule,
       };
     });
@@ -62,10 +68,8 @@ export const RateConfiguration: React.FC = () => {
     if (rate) {
       setModalData(rate);
     } else {
-      // Defaults for a new rate
-      const client = clients.find(c => c.id === selectedClientId);
+      const client = clients.find((c: Client) => c.id === selectedClientId);
       setModalData({
-        id: `RATE-${Date.now()}`,
         clientId: selectedClientId,
         region: 'NCR',
         minimumWeight: 5,
@@ -81,8 +85,7 @@ export const RateConfiguration: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const handleSaveRate = () => {
-    // Validation
+  const handleSaveRate = async () => {
     if (modalData.minimumRate === undefined || modalData.minimumRate < 0) {
       setFormError('Minimum Rate must be a valid positive number.');
       return;
@@ -92,20 +95,25 @@ export const RateConfiguration: React.FC = () => {
       return;
     }
 
-    const isExisting = billingRates.some(r => r.id === modalData.id);
-    if (isExisting) {
-      updateBillingRate(modalData.id as string, modalData);
-      triggerToast('success', 'Success', 'Billing Rate updated successfully.');
-    } else {
-      addBillingRate(modalData as BillingRate);
-      triggerToast('success', 'Success', 'New Billing Rate created successfully.');
+    try {
+      const isExisting = billingRates.some((r: BillingRate) => r.id === modalData.id);
+      if (isExisting && modalData.id) {
+        await ratesService.update(modalData.id, modalData);
+        toast.success('Billing Rate updated successfully.');
+      } else {
+        await ratesService.create(modalData);
+        toast.success('New Billing Rate created successfully.');
+      }
+      refetchRates();
+      setIsModalOpen(false);
+    } catch {
+      toast.error('Failed to save rate configuration.');
     }
-    setIsModalOpen(false);
   };
 
-  if (selectedClientId && clients.find(c => c.id === selectedClientId)) {
-    const client = clients.find(c => c.id === selectedClientId)!;
-    const clientRates = billingRates.filter(r => r.clientId === selectedClientId && r.status === 'Active');
+  if (selectedClientId && clients.find((c: Client) => c.id === selectedClientId)) {
+    const client = clients.find((c: Client) => c.id === selectedClientId)!;
+    const clientRates = billingRates.filter((r: BillingRate) => r.clientId === selectedClientId && r.status === 'Active');
 
     const inputStyle: React.CSSProperties = {
       padding: '8px 10px', border: '1px solid #E2E8F0', borderRadius: 8,
@@ -114,7 +122,7 @@ export const RateConfiguration: React.FC = () => {
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', position: 'relative' }}>
-        <ClientInfoCard client={client} />
+        <ClientInfoCard client={client} onBack={() => navigate('/rate-configuration')} />
 
         <Card>
           <div style={{ padding: '24px' }}>
@@ -151,7 +159,7 @@ export const RateConfiguration: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {clientRates.map((ar, i) => (
+                    {clientRates.map((ar: BillingRate, i: number) => (
                       <tr key={ar.id} style={{ background: i % 2 === 0 ? '#fff' : '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
                         <td style={{ padding: '14px 16px', fontWeight: 700, color: '#0F172A' }}>{ar.region}</td>
                         <td style={{ padding: '14px 16px', textAlign: 'center' }}>{ar.minimumWeight} kg</td>
@@ -177,7 +185,7 @@ export const RateConfiguration: React.FC = () => {
             <div style={{ background: '#fff', borderRadius: 12, width: '500px', padding: '24px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', maxHeight: '90vh', overflowY: 'auto' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                 <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: '#0F172A' }}>
-                  {billingRates.some(r => r.id === modalData.id) ? 'Edit Client Billing Rate' : 'Add Client Billing Rate'}
+                  {billingRates.some((r: BillingRate) => r.id === modalData.id) ? 'Edit Client Billing Rate' : 'Add Client Billing Rate'}
                 </h2>
                 <i className="ti ti-x" style={{ cursor: 'pointer', fontSize: 20, color: '#64748B' }} onClick={() => setIsModalOpen(false)} />
               </div>

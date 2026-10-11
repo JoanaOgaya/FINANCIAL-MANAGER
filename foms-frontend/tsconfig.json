@@ -2,17 +2,17 @@
   "compilerOptions": {
     "target": "ES2020",
     "module": "ESNext",
-    "moduleResolution": "Bundler",
+    "moduleResolution": "bundler",
     "jsx": "react-jsx",
     "strict": true,
     "sourceMap": true,
-    "outDir": "build-ts",
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "noEmit": true
   },
-  "include": ["src"],
-  "exclude": ["node_modules", "dist", "build-ts"]
+  "include": ["src", "vite.config.ts", "vitest.config.ts"],
+  "exclude": ["node_modules", "dist", "build-ts", "src/__tests__", "src/**/*.test.ts", "src/**/*.test.tsx"]
 }

@@ -1,26 +1,29 @@
 import React, { useState, useMemo } from 'react';
-import { useAppData } from '../context/AppDataContext';
 import { useAuth } from '../context/AuthContext';
 import { DataTable } from '../components/DataTable';
 import { Card } from '../components/Card';
 import RecordSettlementModal from '../components/RecordSettlementModal';
 import Dropdown from '../components/Dropdown';
 import { CalendarPicker } from '../components/FormModals';
+import { useQuery } from '../hooks/useQuery';
+import { settlementsService } from '../services/settlementsService';
+import type { Settlement } from '../types/entities';
 
 export default function RecordSettlement() {
-  const { settlements } = useAppData();
+  const { data: settlementsData, refetch } = useQuery('settlements', () => settlementsService.list({ pageSize: 100 }));
+  const settlements: Settlement[] = settlementsData?.items || [];
   const { user } = useAuth();
   
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedRecord, setSelectedRecord] = useState<any>(null);
+  const [selectedRecord, setSelectedRecord] = useState<Settlement | null>(null);
   
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
 
-  // Filter only current user's records for Asst. Finance Manager view
+  // Filter records for current user / accountant view
   const myRecords = useMemo(() => {
-    return settlements.filter(s => {
-      const matchUser = s.recordedBy.includes(user?.fullName || '') || s.recordedBy.includes('Accountant');
+    return settlements.filter((s: Settlement) => {
+      const matchUser = user?.fullName ? s.recordedBy.includes(user.fullName) || s.recordedBy.includes('Accountant') : true;
       
       let matchDate = true;
       if (filterDateFrom || filterDateTo) {
@@ -49,7 +52,7 @@ export default function RecordSettlement() {
       key: 'type',
       label: 'TYPE',
       sortable: true,
-      render: (row: any) => (
+      render: (row: Settlement) => (
         <span style={{ 
           padding: '4px 10px', 
           borderRadius: '20px', 
@@ -65,7 +68,7 @@ export default function RecordSettlement() {
     {
       key: 'courierName',
       label: 'COURIER / TRIP',
-      render: (row: any) => (
+      render: (row: Settlement) => (
         <>
           <div style={{ fontWeight: 600, color: '#1E293B', marginBottom: '2px' }}>{row.courierName}</div>
           <div style={{ fontSize: '12px', color: '#64748B' }}>{row.tripRef}</div>
@@ -76,7 +79,7 @@ export default function RecordSettlement() {
       key: 'submittedAt',
       label: 'SUBMITTED',
       sortable: true,
-      render: (row: any) => (
+      render: (row: Settlement) => (
         <div style={{ fontWeight: 600, color: '#1E293B' }}>
           {new Date(row.submittedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
           , {new Date(row.submittedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
@@ -87,7 +90,7 @@ export default function RecordSettlement() {
       key: 'amount',
       label: 'AMOUNT',
       sortable: true,
-      render: (row: any) => (
+      render: (row: Settlement) => (
         <div style={{ fontWeight: 800, color: row.type === 'Leftover return' ? '#10B981' : '#3B82F6' }}>
           ₱{row.amount.toLocaleString('en-PH', {minimumFractionDigits: 2})}
         </div>
@@ -97,7 +100,7 @@ export default function RecordSettlement() {
       key: 'status',
       label: 'STATUS',
       sortable: true,
-      render: (row: any) => (
+      render: (row: Settlement) => (
         <span style={{ 
           padding: '4px 10px', 
           borderRadius: '20px', 
@@ -113,7 +116,7 @@ export default function RecordSettlement() {
     {
       key: 'actions',
       label: 'ACTION',
-      render: (row: any) => (
+      render: (row: Settlement) => (
         <Dropdown
           align="right"
           items={[
@@ -149,7 +152,7 @@ export default function RecordSettlement() {
                 { label: 'Validated', value: 'Validated' },
                 { label: 'Rejected', value: 'Rejected' }
               ],
-              filterFn: (row: any, value: string) => value === '' || row.status === value
+              filterFn: (row: Settlement, value: string) => value === '' || row.status === value
             }
           ]}
           customFilters={
@@ -159,7 +162,6 @@ export default function RecordSettlement() {
                 placeholder="Start date..."
                 value={filterDateFrom}
                 onChange={date => setFilterDateFrom(date)}
-                maxDate={filterDateTo || "2026-12-31"}
                 variant="toolbar"
               />
               <CalendarPicker
@@ -168,7 +170,6 @@ export default function RecordSettlement() {
                 value={filterDateTo}
                 onChange={date => setFilterDateTo(date)}
                 minDate={filterDateFrom}
-                maxDate="2026-12-31"
                 variant="toolbar"
               />
             </div>
@@ -187,7 +188,10 @@ export default function RecordSettlement() {
 
       <RecordSettlementModal 
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
+        onClose={() => {
+          setIsModalOpen(false);
+          refetch();
+        }}
       />
 
       {/* View Details Modal */}

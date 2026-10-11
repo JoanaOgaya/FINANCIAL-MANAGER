@@ -1,119 +1,93 @@
 import React, { useState, useMemo } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { DataTable } from '../components/DataTable';
 import { CalendarPicker } from '../components/FormModals';
-import { StatusBadge } from '../components/StatusBadge';
-import { SpeedPaySubmission } from '../data/seed';
-import { Card } from '../components/Card';
-import { Button } from '../components/Buttons';
+import { StatusBadge } from '../components/shared/StatusBadge';
 import { useToast } from '../components/ToastContext';
-import { useAppData } from '../context/AppDataContext';
 import { useAuth } from '../context/AuthContext';
 import { TableContainer } from '../components/TableContainer';
-import api from '../services/api';
-
-// ─── Mini Bar Chart ───────────────────────────────────────────────
-function BarChart({ data, color = '#6366F1', height = 120 }: { data: { label: string; value: number }[]; color?: string; height?: number }) {
-  const max = Math.max(...data.map(d => d.value), 1);
-  return (
-    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height, padding: '0 4px' }}>
-      {data.map((d, i) => (
-        <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-          <div style={{ fontSize: 9, color: '#64748B', fontWeight: 700, textAlign: 'center' }}>
-            {d.value > 0 ? (d.value >= 1000 ? `₱${(d.value / 1000).toFixed(0)}k` : `₱${d.value}`) : ''}
-          </div>
-          <div
-            style={{
-              width: '100%',
-              background: `linear-gradient(180deg, ${color}, ${color}99)`,
-              borderRadius: '4px 4px 0 0',
-              height: `${(d.value / max) * (height - 30)}px`,
-              minHeight: d.value > 0 ? 4 : 0,
-              transition: 'height 0.4s ease',
-            }}
-          />
-          <div style={{ fontSize: 9, color: '#94A3B8', fontWeight: 600, textAlign: 'center', lineHeight: 1.2 }}>{d.label}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ─── Mini Donut Chart ──────────────────────────────────────────────
-function DonutChart({ segments, size = 100 }: { segments: { label: string; value: number; color: string }[]; size?: number }) {
-  const total = segments.reduce((s, d) => s + d.value, 0) || 1;
-  const r = size / 2 - 10;
-  const cx = size / 2;
-  const cy = size / 2;
-  const strokeWidth = 16;
-  let cumulative = 0;
-
-  const arcs = segments.map(seg => {
-    const pct = seg.value / total;
-    const startAngle = cumulative * 2 * Math.PI - Math.PI / 2;
-    cumulative += pct;
-    const endAngle = cumulative * 2 * Math.PI - Math.PI / 2;
-    const x1 = cx + r * Math.cos(startAngle);
-    const y1 = cy + r * Math.sin(startAngle);
-    const x2 = cx + r * Math.cos(endAngle);
-    const y2 = cy + r * Math.sin(endAngle);
-    const largeArc = pct > 0.5 ? 1 : 0;
-    return { ...seg, d: pct > 0.001 ? `M ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2}` : '' };
-  });
-
-  return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-      <circle cx={cx} cy={cy} r={r} fill="none" stroke="#F1F5F9" strokeWidth={strokeWidth} />
-      {arcs.map((arc, i) =>
-        arc.d ? (
-          <path key={i} d={arc.d} fill="none" stroke={arc.color} strokeWidth={strokeWidth} strokeLinecap="round" />
-        ) : null
-      )}
-      <text x={cx} y={cy + 5} textAnchor="middle" fontSize={12} fontWeight={800} fill="#0F172A">
-        {total}
-      </text>
-    </svg>
-  );
-}
+import { speedpayService } from '../services/speedpayService';
+import { invoicesService } from '../services/invoicesService';
+import { clientsService } from '../services/clientsService';
+import { paymentsService } from '../services/paymentsService';
+import { useQuery } from '../hooks/useQuery';
+import { formatCurrency } from '../utils/format';
+import { LoadingSpinner } from '../components/shared/LoadingSpinner';
+import { useDuplicatePreCheck } from '../hooks/useDuplicatePreCheck';
+import { DuplicatePreCheckModal } from '../components/ai/DuplicatePreCheckModal';
+import { canCheckDuplicateInForm, canActOnRecord } from '../utils/roleAccess';
+import { Role, type SpeedPaySubmission, type Invoice, type Client } from '../types/entities';
 
 export const SpeedPayValidation: React.FC = () => {
   const { toast } = useToast();
   const { user } = useAuth();
   const navigate = useNavigate();
   const [selectedSubmission, setSelectedSubmission] = useState<any | null>(null);
-  const { speedPay, invoices, clients, receipts, refreshSpeedPay, refreshPayments, refreshInvoices, refreshReceipts, waybills, billingRecords } = useAppData();
+
+  const {
+    data: initialData,
+    isLoading: loading,
+    error,
+    refetch,
+  } = useQuery(
+    'speedpay:validation_list',
+    async () => {
+      const [spRes, invRes, cliRes] = await Promise.all([
+        speedpayService.list({ pageSize: 100 }),
+        invoicesService.list({ pageSize: 100 }),
+        clientsService.list({ pageSize: 100 }),
+      ]);
+      return {
+        speedPay: spRes.items || [],
+        invoices: invRes.items || [],
+        clients: cliRes.items || [],
+      };
+    }
+  );
+
+  const speedPay = initialData?.speedPay || [];
+  const invoices = initialData?.invoices || [];
+  const clients = initialData?.clients || [];
 
   const [validationStatus, setValidationStatus] = useState<'Approve' | 'Reject' | 'Endorse' | 'Return' | ''>('');
   const [rejectionReason, setRejectionReason] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
+  const {
+    modalState: dupModalState,
+    runPreCheck,
+    handleModalCancel,
+    handleModalRetry,
+    handleProceedWithRemarks,
+    handleProceedWithManualReview,
+  } = useDuplicatePreCheck();
+
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
 
   // ─── Enrich SpeedPay submissions ─────────────────────────────────
-  const allEnriched = speedPay.map(sub => {
-    const invoice = invoices.find(i => i.id === sub.invoiceId);
-    const clientId = (sub as any).clientId || (invoice ? invoice.clientId : 'UNKNOWN');
-    const client = clients.find(c => c.id === clientId);
+  const allEnriched = useMemo(() => {
+    return speedPay.map((sub: SpeedPaySubmission) => {
+      const invoice = invoices.find((i: Invoice) => i.id === sub.invoiceId);
+      const clientId = (sub as any).clientId || (invoice ? invoice.clientId : 'UNKNOWN');
+      const client = clients.find((c: Client) => c.id === clientId);
 
-    // Ensure the submittedAt string is treated as UTC if it doesn't have timezone info
-    let submittedTimeStr = sub.submittedAt || new Date().toISOString();
-    if (!submittedTimeStr.endsWith('Z') && !submittedTimeStr.includes('+')) {
-      submittedTimeStr += 'Z';
-    }
+      let submittedTimeStr = sub.submittedAt || new Date().toISOString();
+      if (!submittedTimeStr.endsWith('Z') && !submittedTimeStr.includes('+')) {
+        submittedTimeStr += 'Z';
+      }
 
-    return {
-      ...sub,
-      clientId,
-      clientName: sub.clientName ?? client?.name ?? 'Unknown',
-      invoiceNumber: sub.invoiceNumber ?? invoice?.invoiceNumber ?? sub.invoiceId,
-      invoiceAmount: invoice?.totalAmount ?? sub.amountPaid ?? 0,
-      submittedAt: submittedTimeStr
-    };
-  });
-  console.log('[SpeedPayValidation] selectedSubmission:', selectedSubmission?.id);
-  console.log('[SpeedPayValidation] allEnriched ids:', allEnriched.map(s => s.id));
+      return {
+        ...sub,
+        clientId,
+        clientName: sub.clientName ?? client?.name ?? 'Unknown',
+        invoiceNumber: sub.invoiceNumber ?? invoice?.invoiceNumber ?? sub.invoiceId,
+        invoiceAmount: invoice?.totalAmount ?? sub.amountPaid ?? 0,
+        submittedAt: submittedTimeStr
+      };
+    });
+  }, [speedPay, invoices, clients]);
 
   // ─── Chart Data ───────────────────────────────────────────────────
   const pending = allEnriched.filter(s => s.status === 'Pending Validation').length;
@@ -121,21 +95,10 @@ export const SpeedPayValidation: React.FC = () => {
   const rejected = allEnriched.filter(s => s.status === 'Rejected').length;
   const todayStr = new Date().toLocaleDateString('en-PH');
   const validatedToday = allEnriched.filter(s => s.status === 'Validated' && new Date((s as any).validatedAt || '').toLocaleDateString('en-PH') === todayStr).length;
-  const rejectedToday = allEnriched.filter(s => s.status === 'Rejected').length;
 
   const totalCollected = useMemo(() =>
     allEnriched.filter(s => s.status === 'Validated').reduce((sum, s) => sum + (s.amountPaid ?? 0), 0),
     [allEnriched]
-  );
-
-  const totalOutstanding = useMemo(() =>
-    invoices.filter(i => i.status !== 'Paid').reduce((sum, i) => sum + (i.totalAmount ?? 0), 0),
-    [invoices]
-  );
-
-  const totalPaid = useMemo(() =>
-    invoices.filter(i => i.status === 'Paid').reduce((sum, i) => sum + (i.totalAmount ?? 0), 0),
-    [invoices]
   );
 
   const pendingAmount = useMemo(() =>
@@ -143,69 +106,57 @@ export const SpeedPayValidation: React.FC = () => {
     [allEnriched]
   );
 
-  // Monthly payment summary (last 6 months)
-  const monthlyData = useMemo(() => {
-    const months: { label: string; value: number }[] = [];
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date();
-      d.setMonth(d.getMonth() - i);
-      const label = d.toLocaleDateString('en-US', { month: 'short' });
-      const year = d.getFullYear();
-      const month = d.getMonth();
-      const value = allEnriched
-        .filter(s => {
-          const sd = new Date(s.submittedAt);
-          return sd.getFullYear() === year && sd.getMonth() === month && s.status === 'Validated';
-        })
-        .reduce((sum, s) => sum + (s.amountPaid ?? 0), 0);
-      months.push({ label, value });
-    }
-    return months;
-  }, [allEnriched]);
-
-  // Payment method breakdown
-  const methodBreakdown = useMemo(() => {
-    const counts: Record<string, number> = {};
-    allEnriched.forEach(s => {
-      const m = s.paymentMethod ?? 'Unknown';
-      counts[m] = (counts[m] ?? 0) + 1;
-    });
-    const colors: Record<string, string> = {
-      GCash: '#007AFF', Maya: '#00AA6C', 'Bank Transfer': '#1E3A5F',
-      'BDO Online': '#0066CC', 'BPI Online': '#CC0000', Unknown: '#94A3B8'
-    };
-    return Object.entries(counts).map(([label, value]) => ({ label, value, color: colors[label] ?? '#6366F1' }));
-  }, [allEnriched]);
-
-  // ─── Handle Validate/Reject — PERSISTS TO DB ────────────────────
+  // ─── Handle Validate/Reject ────────────────────
   const handleValidate = async (sub: any) => {
     if ((validationStatus === 'Reject' || validationStatus === 'Return') && !rejectionReason.trim()) {
       toast.error(`Please provide a ${validationStatus === 'Reject' ? 'rejection' : 'return'} reason.`, 'Required Field Missing');
       return;
     }
+
+    // Separation of duties check: creator cannot approve own record
+    if (sub.createdBy && (sub.createdBy === user?.id || sub.createdBy === user?.employeeId)) {
+      toast.error('You cannot act on your own record.', 'Separation of Duties');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       if (validationStatus === 'Approve') {
-        // Backend atomically: validates payment, marks invoice Paid, updates AR to 0, creates OR
-        await api.put(`/speedpay/submissions/${sub.id}/status`, { Status: 'Validated', Remarks: 'Approved via SpeedPay Validation' });
-        toast.success(`Payment from ${sub.clientName} approved. Invoice = Paid. OR generated.`, 'Payment Validated');
+        // Pre-save duplicate check on payment reference number
+        if (sub.referenceNumber && canCheckDuplicateInForm(user?.role, 'speedpay')) {
+          const check = await runPreCheck({
+            entityType: 'speedpay',
+            fieldName: 'referenceNumber',
+            fieldValue: sub.referenceNumber,
+            entityId: sub.id,
+          });
+          if (!check.canProceed) {
+            setIsSubmitting(false);
+            return;
+          }
+        }
+
+        await speedpayService.validate(sub.id, { status: 'Validated', notes: 'Approved via SpeedPay Validation' });
+        // Mark payment or invoice as paid
+        if (sub.invoiceId) {
+          await invoicesService.update(sub.invoiceId, { status: 'Paid' as any });
+        }
+        toast.success(`Payment from ${sub.clientName} approved. Invoice marked as Paid.`, 'Payment Validated');
       } else if (validationStatus === 'Reject') {
-        await api.put(`/speedpay/submissions/${sub.id}/status`, { Status: 'Rejected', Remarks: rejectionReason });
+        await speedpayService.validate(sub.id, { status: 'Rejected', notes: rejectionReason });
         toast.error(`Payment from ${sub.clientName} has been Rejected.`, 'Payment Rejected');
       } else if (validationStatus === 'Endorse') {
-        await api.put(`/speedpay/submissions/${sub.id}/status`, { Status: 'Pending Finance Validation', Remarks: 'Endorsed for final validation by Accountant' });
+        await speedpayService.update(sub.id, { status: 'Pending Finance Validation' as any, notes: 'Endorsed for final validation by Accountant' } as any);
         toast.success(`Payment from ${sub.clientName} endorsed to Finance Manager.`, 'Endorsed');
       } else if (validationStatus === 'Return') {
-        await api.put(`/speedpay/submissions/${sub.id}/status`, { Status: 'Returned / Needs Correction', Remarks: rejectionReason });
+        await speedpayService.update(sub.id, { status: 'Returned / Needs Correction' as any, notes: rejectionReason } as any);
         toast.error(`Payment from ${sub.clientName} returned for correction.`, 'Payment Returned');
       }
       
-      // Refresh all from DB — single source of truth, persists after refresh/restart
-      await Promise.all([refreshSpeedPay(), refreshPayments(), refreshInvoices(), refreshReceipts()]);
-      navigate('/speedpay-validation');
+      await refetch();
+      setSelectedSubmission(null);
     } catch (err: any) {
-      const msg = err?.response?.data?.message ?? err?.message ?? 'Action failed.';
-      toast.error(msg, 'Validation Error');
+      toast.error(err?.message ?? 'Action failed.', 'Validation Error');
     } finally {
       setIsSubmitting(false);
     }
@@ -226,7 +177,7 @@ export const SpeedPayValidation: React.FC = () => {
     { key: 'paymentMethod', label: 'METHOD' },
     {
       key: 'amountPaid', label: 'AMOUNT', sortable: true,
-      render: (row: any) => <span style={{ fontWeight: 700, color: '#0F172A' }}>₱{Number(row.amountPaid).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+      render: (row: any) => <span style={{ fontWeight: 700, color: '#0F172A' }}>{formatCurrency(Number(row.amountPaid))}</span>
     },
     {
       key: 'proofFileName', label: 'PROOF',
@@ -248,8 +199,6 @@ export const SpeedPayValidation: React.FC = () => {
       onClick: (row: any) => setSelectedSubmission(row),
     },
   ];
-
-  // ─── Main Dashboard View ────────────────────────────────────────────
 
   const filteredData = useMemo(() => {
     let result = allEnriched;
@@ -292,16 +241,39 @@ export const SpeedPayValidation: React.FC = () => {
     }
   ];
 
+  if (loading) {
+    return <LoadingSpinner text="Loading SpeedPay validation queue..." />;
+  }
+
+  if (error) {
+    return (
+      <div style={{ padding: '64px 24px', textAlign: 'center', background: '#fff', borderRadius: '12px', border: '1px solid #E2E8F0', margin: '20px 0' }}>
+        <i className="ti ti-alert-triangle" style={{ fontSize: '3rem', color: '#EF4444', marginBottom: 12, display: 'block' }} />
+        <h3 style={{ margin: '0 0 8px', fontSize: '1.25rem', fontWeight: 700, color: '#0F172A' }}>SpeedPay service unavailable</h3>
+        <p style={{ margin: '0 0 20px', color: '#64748B', fontSize: '0.9rem' }}>
+          Unable to connect to the SpeedPay API service. The rest of FOMS remains operational.
+        </p>
+        <button
+          type="button"
+          onClick={() => refetch()}
+          style={{ background: '#0D9488', color: '#fff', border: 'none', padding: '10px 24px', borderRadius: '8px', fontWeight: 600, cursor: 'pointer' }}
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
 
       {/* KPI Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 16 }}>
         {[
-          { label: 'PENDING VALIDATION', value: pending, border: '#FDE68A', bg: '#fff', color: '#D97706', sub: `₱${pendingAmount.toLocaleString('en-PH', { maximumFractionDigits: 0 })} awaiting` },
+          { label: 'PENDING VALIDATION', value: pending, border: '#FDE68A', bg: '#fff', color: '#D97706', sub: `${formatCurrency(pendingAmount)} awaiting` },
           { label: 'VALIDATED', value: validated, border: '#BBF7D0', bg: '#fff', color: '#16A34A', sub: `Today: ${validatedToday}` },
           { label: 'REJECTED', value: rejected, border: '#FECACA', bg: '#fff', color: '#B91C1C', sub: `Total returned` },
-          { label: 'TOTAL COLLECTED', value: `₱${(totalCollected / 1000).toFixed(1)}k`, border: '#C7D2FE', bg: '#fff', color: '#4F46E5', sub: `From validated payments` },
+          { label: 'TOTAL COLLECTED', value: formatCurrency(totalCollected), border: '#C7D2FE', bg: '#fff', color: '#4F46E5', sub: `From validated payments` },
         ].map((kpi: any, i) => (
           <div
             key={i}
@@ -327,7 +299,6 @@ export const SpeedPayValidation: React.FC = () => {
           </div>
         ))}
       </div>
-
 
       <TableContainer>
         <DataTable
@@ -355,7 +326,7 @@ export const SpeedPayValidation: React.FC = () => {
                   onChange={setDateFrom}
                   placeholder="Start date..."
                   variant="filter"
-                  maxDate="2024-12-31"
+                  maxDate="2026-12-31"
                 />
               </div>
             </div>
@@ -369,7 +340,7 @@ export const SpeedPayValidation: React.FC = () => {
                   placeholder="End date..."
                   variant="filter"
                   minDate={dateFrom}
-                  maxDate="2024-12-31"
+                  maxDate="2026-12-31"
                 />
               </div>
               </div>
@@ -404,7 +375,6 @@ export const SpeedPayValidation: React.FC = () => {
 
             {/* Scrollable Content */}
             <div style={{ flex: 1, overflowY: 'auto', padding: '28px 32px' }}>
-              {/* TOP — Client & Payment Details */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 28, paddingBottom: 28, borderBottom: '1px solid #E2E8F0' }}>
                 <h4 style={{ margin: 0, fontSize: '0.85rem', fontWeight: 800, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em' }}>CLIENT & PAYMENT DETAILS</h4>
                 
@@ -433,7 +403,7 @@ export const SpeedPayValidation: React.FC = () => {
                 <div>
                   <label style={{ display: 'block', fontSize: 12, fontWeight: 800, color: '#64748B', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>AMOUNT PAID</label>
                   <div style={{ padding: '16px 20px', background: '#F0FDF4', border: '1px solid #16A34A', borderLeft: '4px solid #16A34A', borderRadius: 8, fontSize: 24, color: '#15803D', fontWeight: 800 }}>
-                    ₱{Number(selectedSubmission.amountPaid).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                    {formatCurrency(Number(selectedSubmission.amountPaid))}
                   </div>
                 </div>
               </div>
@@ -477,7 +447,7 @@ export const SpeedPayValidation: React.FC = () => {
                       style={{ width: '100%', padding: '10px 14px', border: '1px solid #E2E8F0', borderRadius: 6, fontSize: 14, background: '#fff', color: '#0F172A', outline: 'none' }}
                     >
                       <option value="" disabled>Select Decision...</option>
-                      {user?.role === 'Accountant' ? (
+                      {user?.role === Role.ACCOUNTANT ? (
                         <>
                           <option value="Endorse">Endorse for Validation</option>
                           <option value="Return">Return for Correction</option>
@@ -534,6 +504,15 @@ export const SpeedPayValidation: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Duplicate Pre-Check Modal */}
+      <DuplicatePreCheckModal
+        state={dupModalState}
+        onCancel={handleModalCancel}
+        onRetry={handleModalRetry}
+        onProceedWithRemarks={handleProceedWithRemarks}
+        onProceedWithManualReview={handleProceedWithManualReview}
+      />
 
     </div>
   );

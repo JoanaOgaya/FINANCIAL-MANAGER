@@ -1,34 +1,43 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useParams, useNavigate } from 'react-router-dom';
-import { StatusBadge } from '../components/StatusBadge';
+import { StatusBadge } from '../components/shared/StatusBadge';
 import { Card } from '../components/Card';
-import { StatusCard } from '../components/StatusCard';
+import { KpiCard } from '../components/shared/KpiCard';
 import { Button } from '../components/Buttons';
 import { useToast } from '../components/ToastContext';
 import { ClientInfoCard } from '../components/ClientInfoCard';
-import '../components/FormModals.css';
-import {
-  Invoice,
-  SEEDED_USERS
-} from '../data/seed';
-import { useAppData } from '../context/AppDataContext';
-import { RecordHistoryModal } from '../components/RecordHistoryModal';
 import { DataTable } from '../components/DataTable';
 import { TableContainer } from '../components/TableContainer';
+import { useQuery } from '../hooks/useQuery';
+import { invoicesService } from '../services/invoicesService';
+import { waybillsService } from '../services/waybillsService';
+import { clientsService } from '../services/clientsService';
+import { ratesService } from '../services/ratesService';
+import { auditLogsService } from '../services/auditLogsService';
+import type { Invoice, Waybill, Client, BillingRate } from '../types/entities';
 import { computeFreightCost } from '../utils/billing';
+import { formatCurrency, formatDate } from '../utils/format';
+import '../components/FormModals.css';
 
 export const InvoiceReview: React.FC = () => {
   const { toast } = useToast();
   const { id } = useParams();
   const navigate = useNavigate();
-  const { invoices, updateInvoice, waybills, clients, billingRates, billingRecords } = useAppData();
-  const [remarks, setRemarks] = useState('');
-  const [reviewAction, setReviewAction] = useState('');
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const location = useLocation();
 
-  // Selected invoice for the new Modal UI
+  const { data: invData, refetch: refetchInvoices } = useQuery('review:invoices', () => invoicesService.list({ pageSize: 100 }));
+  const { data: wbData } = useQuery('review:waybills', () => waybillsService.list({ pageSize: 200 }));
+  const { data: clientData } = useQuery('review:clients', () => clientsService.list({ pageSize: 100 }));
+  const { data: rateData } = useQuery('review:rates', () => ratesService.list({ pageSize: 100 }));
+
+  const invoices: Invoice[] = invData?.items || [];
+  const waybills: Waybill[] = wbData?.items || [];
+  const clients: Client[] = clientData?.items || [];
+  const billingRates: BillingRate[] = rateData?.items || [];
+
+  const [remarks, setRemarks] = useState('');
+  const [reviewAction, setReviewAction] = useState('');
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [expandedWaybills, setExpandedWaybills] = useState<Record<string, boolean>>({});
 
@@ -37,13 +46,11 @@ export const InvoiceReview: React.FC = () => {
       if (location.state?.invoiceId) {
         const inv = invoices.find(i => i.id === location.state.invoiceId);
         if (inv) setSelectedInvoice(inv);
-        // Clear state to avoid reopening if dismissed
         navigate(location.pathname, { replace: true, state: {} });
       }
     }
   }, [location.state, navigate, invoices, location.pathname]);
 
-  // Handle URL param (legacy support, or if they reload page with /:id)
   const viewClient = clients.find(c => c.id === id);
   const selectedClientId = viewClient ? viewClient.id : location.state?.clientId;
 
@@ -82,123 +89,105 @@ export const InvoiceReview: React.FC = () => {
     .reduce((sum, i) => sum + i.totalAmount, 0);
 
   // Status Handlers
-  const handleApprove = (viewInvoice: Invoice) => {
-    updateInvoice(viewInvoice.id, { status: 'Approved' });
-    toast.success(`Invoice ${viewInvoice.invoiceNumber} has been Approved.`, 'Success');
-    setSelectedInvoice(null);
-    setReviewAction('');
+  const handleApprove = async (viewInvoice: Invoice) => {
+    try {
+      await invoicesService.act(viewInvoice.id, 'approve');
+      await auditLogsService.create({
+        action: 'APPROVE_INVOICE',
+        module: 'InvoiceReview',
+        recordId: viewInvoice.id,
+        recordType: 'Invoice',
+        details: `Approved invoice ${viewInvoice.invoiceNumber}`,
+        ipAddress: '127.0.0.1',
+      });
+      refetchInvoices();
+      toast.success(`Invoice ${viewInvoice.invoiceNumber} has been approved.`, 'Success');
+      setSelectedInvoice(null);
+      setReviewAction('');
+    } catch {
+      toast.error('Failed to approve invoice.', 'Error');
+    }
   };
 
-  const handleReject = (viewInvoice: Invoice) => {
+  const handleReject = async (viewInvoice: Invoice) => {
     if (!remarks.trim()) {
       toast.error('Please provide remarks for the correction.', 'Error');
       return;
     }
-    updateInvoice(viewInvoice.id, { status: 'Needs Revision', notes: remarks });
-    toast.error(`Invoice ${viewInvoice.invoiceNumber} returned for correction.`, 'Returned');
-    setSelectedInvoice(null);
-    setRemarks('');
-    setReviewAction('');
-    setExpandedWaybills({});
+    try {
+      await invoicesService.act(viewInvoice.id, 'reject', { remarks });
+      await auditLogsService.create({
+        action: 'RETURN_INVOICE',
+        module: 'InvoiceReview',
+        recordId: viewInvoice.id,
+        recordType: 'Invoice',
+        details: `Returned invoice ${viewInvoice.invoiceNumber} with remarks: ${remarks}`,
+        ipAddress: '127.0.0.1',
+      });
+      refetchInvoices();
+      toast.error(`Invoice ${viewInvoice.invoiceNumber} returned for correction.`, 'Returned');
+      setSelectedInvoice(null);
+      setRemarks('');
+      setReviewAction('');
+      setExpandedWaybills({});
+    } catch {
+      toast.error('Failed to return invoice.', 'Error');
+    }
   };
 
   const renderModal = () => {
     if (!selectedInvoice) return null;
     const client = clients.find(c => c.id === selectedInvoice.clientId);
-    const submitter = SEEDED_USERS.find(u => u.employeeId === selectedInvoice.createdBy);
-    let invoiceWaybills = waybills.filter(w => selectedInvoice.waybillIds.includes(w.id));
-    
-    if (invoiceWaybills.length === 0) {
-      invoiceWaybills = [{
-        id: 'DUMMY-WB-1',
-        waybillNumber: 'WB-DUMMY-' + (selectedInvoice.invoiceNumber || selectedInvoice.id).substring(0, 8),
-        clientCode: selectedInvoice.clientId,
-        deliveryDate: selectedInvoice.createdAt,
-        status: 'Validated',
-        hasOriginalPOD: true,
-        hasApprovedCTC: false,
-        encodedBy: 'System',
-        encodedAt: selectedInvoice.createdAt,
-        senderName: 'Dummy Sender Inc.',
-        receiverName: 'Juan Dela Cruz',
-        receiverAddress: '123 Dummy St., Metro Manila',
-        itemQuantity: 1,
-        declaredValue: 5000,
-      } as any];
-    }
+    const invoiceWaybills = waybills.filter(w => selectedInvoice.waybillIds?.includes(w.id));
 
     return createPortal(
       <div style={{ position: 'fixed', inset: 0, zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(15, 23, 42, 0.6)', backdropFilter: 'blur(8px)', padding: '20px' }}>
         <div style={{ background: '#fff', borderRadius: '12px', width: '100%', maxWidth: '700px', maxHeight: '90vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)' }}>
-
           <div style={{ padding: '24px 32px', borderBottom: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', position: 'sticky', top: 0, background: '#fff', zIndex: 10 }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ fontSize: '11px', fontWeight: 700, color: '#047857', border: '1px solid #10B981', padding: '4px 8px', borderRadius: '999px' }}>
                   {selectedInvoice.invoiceNumber}
                 </span>
-                <span style={{ fontSize: '11px', color: '#94A3B8', borderBottom: '1px dashed #94A3B8' }}>full ID</span>
+                <span style={{ fontSize: '11px', color: '#94A3B8', borderBottom: '1px dashed #94A3B8' }}>{selectedInvoice.id}</span>
               </div>
-              <h2 style={{ margin: '4px 0', fontSize: '1.25rem', color: '#0F172A', fontWeight: 800 }}>{client?.name || 'Unknown'}</h2>
+              <h2 style={{ margin: '4px 0', fontSize: '1.25rem', color: '#0F172A', fontWeight: 800 }}>{client?.name || selectedInvoice.clientId}</h2>
               <div style={{ display: 'inline-block', padding: '2px 10px', borderRadius: '999px', background: (selectedInvoice.status === 'Overdue' || selectedInvoice.status === 'Outstanding') ? '#FFFBEB' : '#F1F5F9', color: (selectedInvoice.status === 'Overdue' || selectedInvoice.status === 'Outstanding') ? '#D97706' : '#64748B', fontSize: '0.75rem', fontWeight: 700, width: 'fit-content' }}>
-                {selectedInvoice.status === 'Pending Approval' ? 'Pending Review' : selectedInvoice.status}
+                {selectedInvoice.status}
               </div>
             </div>
             <button
               onClick={() => { setSelectedInvoice(null); setRemarks(''); setReviewAction(''); setExpandedWaybills({}); }}
               style={{ background: 'transparent', border: '1px solid #E2E8F0', borderRadius: '6px', padding: '4px 8px', fontSize: '1.2rem', cursor: 'pointer', color: '#94A3B8' }}
             >
-              ×
+              &times;
             </button>
           </div>
 
           <div style={{ padding: '32px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
-
-            {/* Meta details matching Image 1 style */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
               <div style={{ background: '#ECFDF5', border: '1px solid #10B981', borderRadius: '8px', padding: '12px 16px' }}>
-                <div style={{ fontSize: '10px', color: '#64748B', marginBottom: '4px' }}>Outstanding Balance</div>
-                <div style={{ fontSize: '15px', color: '#047857', fontWeight: 800 }}>₱{selectedInvoice.totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</div>
+                <div style={{ fontSize: '10px', color: '#64748B', marginBottom: '4px' }}>Total Amount</div>
+                <div style={{ fontSize: '15px', color: '#047857', fontWeight: 800 }}>{formatCurrency(selectedInvoice.totalAmount)}</div>
               </div>
               <div style={{ background: '#fff', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '12px 16px' }}>
                 <div style={{ fontSize: '10px', color: '#64748B', marginBottom: '4px' }}>Due Date</div>
-                <div style={{ fontSize: '13px', color: '#0F172A', fontWeight: 800 }}>{new Date(selectedInvoice.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
+                <div style={{ fontSize: '13px', color: '#0F172A', fontWeight: 800 }}>{formatDate(selectedInvoice.dueDate)}</div>
               </div>
               <div style={{ background: '#fff', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '12px 16px' }}>
-                <div style={{ fontSize: '10px', color: '#64748B', marginBottom: '4px' }}>Submitted By</div>
-                <div style={{ fontSize: '13px', color: '#0F172A', fontWeight: 500 }}>{submitter?.fullName || selectedInvoice.createdBy}</div>
+                <div style={{ fontSize: '10px', color: '#64748B', marginBottom: '4px' }}>Prepared By</div>
+                <div style={{ fontSize: '13px', color: '#0F172A', fontWeight: 500 }}>{selectedInvoice.createdBy}</div>
               </div>
             </div>
 
             <div style={{ fontSize: '11px', fontWeight: 800, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '-4px 0 -12px' }}>
-              WAYBILL LINES · {invoiceWaybills.length}
+              WAYBILL LINES &bull; {invoiceWaybills.length}
             </div>
 
-            {/* Waybill Lines Breakdown */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {invoiceWaybills.map((wb) => {
-                const br = billingRecords.find(r => r.waybillId === wb.id && r.status === 'Approved');
                 let fd;
-                
-                if (br) {
-                  fd = {
-                    area: billingRates.find(r => r.id === br.rateId)?.region || 'Unknown',
-                    chargeableWeight: br.chargeableWeight,
-                    weightBasis: br.volumeWeight > br.actualWeight ? 'Volume Weight' : 'Actual Weight',
-                    freightCost: br.freightCost,
-                    valuation: br.valuation || 0,
-                    odaCharge: br.odaCharge || 0,
-                  };
-                } else if (wb.id === 'DUMMY-WB-1') {
-                  fd = {
-                    area: 'Metro Manila',
-                    chargeableWeight: 10,
-                    weightBasis: 'act',
-                    freightCost: selectedInvoice.amount,
-                    valuation: 50,
-                    odaCharge: 0,
-                  };
-                } else {
+                try {
                   const computed = computeFreightCost(wb, billingRates);
                   fd = {
                     area: computed.area,
@@ -207,16 +196,22 @@ export const InvoiceReview: React.FC = () => {
                     freightCost: computed.freightCost,
                     valuation: computed.valuation || 0,
                     odaCharge: computed.odaCharge || 0,
+                    grandTotal: computed.grandTotal,
+                  };
+                } catch {
+                  fd = {
+                    area: wb.destinationArea || 'NCR',
+                    chargeableWeight: 1,
+                    weightBasis: 'Weight',
+                    freightCost: 0,
+                    valuation: 0,
+                    odaCharge: 0,
+                    grandTotal: 0,
                   };
                 }
                 
                 const isExpanded = expandedWaybills[wb.id];
                 const toggleExpand = () => setExpandedWaybills(prev => ({ ...prev, [wb.id]: !prev[wb.id] }));
-
-                const lineValuation = fd.valuation > 0 ? fd.valuation : 50;
-                const lineVat = fd.freightCost * 0.1206;
-                const lineSurcharge = fd.freightCost * 0.15;
-                const lineTotal = fd.freightCost + lineValuation + fd.odaCharge + lineVat + lineSurcharge;
 
                 return (
                   <div key={wb.id} style={{ background: '#fff', borderRadius: 8, border: '1px solid #E2E8F0', overflow: 'hidden' }}>
@@ -229,7 +224,7 @@ export const InvoiceReview: React.FC = () => {
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                         <span style={{ fontSize: '13px', fontWeight: 800, color: '#0F172A' }}>
-                          ₱{lineTotal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                          {formatCurrency(fd.grandTotal)}
                         </span>
                         <i className={`ti ti-chevron-${isExpanded ? 'up' : 'down'}`} style={{ color: '#64748B', fontSize: 16 }} />
                       </div>
@@ -240,25 +235,20 @@ export const InvoiceReview: React.FC = () => {
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: '10px', fontWeight: 700, color: '#94A3B8', marginBottom: 12, letterSpacing: '0.05em', textTransform: 'uppercase' }}>WAYBILL DETAILS</div>
                           <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '8px 16px', fontSize: '11px', color: '#64748B' }}>
-                            <span>Sender</span><span style={{ textAlign: 'right', fontWeight: 500, color: '#0F172A', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{wb.senderName}</span>
-                            <span>Receiver</span><span style={{ textAlign: 'right', fontWeight: 500, color: '#0F172A', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{wb.receiverName}</span>
-                            <span>Address</span><span style={{ textAlign: 'right', fontWeight: 500, color: '#0F172A', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={wb.receiverAddress}>{wb.receiverAddress}</span>
-                            <span>Date</span><span style={{ textAlign: 'right', fontWeight: 500, color: '#0F172A' }}>{new Date(wb.deliveryDate).toLocaleDateString('en-US')}</span>
-                            <span>Items</span><span style={{ textAlign: 'right', fontWeight: 500, color: '#0F172A' }}>{wb.itemQuantity} box</span>
-                            <span>Declared value</span><span style={{ textAlign: 'right', fontWeight: 500, color: '#0F172A' }}>₱{(wb.declaredValue || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                            <span>Delivery Date</span><span style={{ textAlign: 'right', fontWeight: 500, color: '#0F172A' }}>{formatDate(wb.deliveryDate)}</span>
+                            <span>Status</span><span style={{ textAlign: 'right', fontWeight: 500, color: '#0F172A' }}>{wb.status}</span>
+                            <span>Original POD</span><span style={{ textAlign: 'right', fontWeight: 500, color: '#0F172A' }}>{wb.hasOriginalPOD ? 'Yes' : 'No'}</span>
+                            <span>Approved CTC</span><span style={{ textAlign: 'right', fontWeight: 500, color: '#0F172A' }}>{wb.hasApprovedCTC ? 'Yes' : 'No'}</span>
                           </div>
                         </div>
                         <div style={{ width: '1px', background: '#E2E8F0' }} />
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: '10px', fontWeight: 700, color: '#94A3B8', marginBottom: 12, letterSpacing: '0.05em', textTransform: 'uppercase' }}>COMPUTATION</div>
                           <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '8px 16px', fontSize: '11px', color: '#64748B' }}>
-                            <span>Chargeable wt.</span><span style={{ textAlign: 'right', fontWeight: 500, color: '#0F172A' }}>{fd.chargeableWeight.toFixed(2)} kg ({fd.weightBasis})</span>
-                            <span>Freight cost</span><span style={{ textAlign: 'right', fontWeight: 500, color: '#0F172A' }}>₱{fd.freightCost.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
-                            <span>Valuation (1%)</span><span style={{ textAlign: 'right', fontWeight: 500, color: '#0F172A' }}>₱{lineValuation.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
-                            <span>ODA</span><span style={{ textAlign: 'right', fontWeight: 500, color: '#0F172A' }}>₱{fd.odaCharge.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
-                            <span>VAT (12%)</span><span style={{ textAlign: 'right', fontWeight: 500, color: '#0F172A' }}>₱{lineVat.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
-                            <span>Fuel surcharge (15%)</span><span style={{ textAlign: 'right', fontWeight: 500, color: '#0F172A' }}>₱{lineSurcharge.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
-                            <span style={{ marginTop: '8px', color: '#0F172A' }}>Line total</span><span style={{ marginTop: '8px', textAlign: 'right', fontWeight: 700, color: '#047857' }}>₱{lineTotal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                            <span>Chargeable wt.</span><span style={{ textAlign: 'right', fontWeight: 500, color: '#0F172A' }}>{fd.chargeableWeight.toFixed(2)} kg</span>
+                            <span>Freight cost</span><span style={{ textAlign: 'right', fontWeight: 500, color: '#0F172A' }}>{formatCurrency(fd.freightCost)}</span>
+                            <span>Valuation</span><span style={{ textAlign: 'right', fontWeight: 500, color: '#0F172A' }}>{formatCurrency(fd.valuation)}</span>
+                            <span>ODA</span><span style={{ textAlign: 'right', fontWeight: 500, color: '#0F172A' }}>{formatCurrency(fd.odaCharge)}</span>
                           </div>
                         </div>
                       </div>
@@ -266,68 +256,47 @@ export const InvoiceReview: React.FC = () => {
                   </div>
                 );
               })}
-              {/* Grand totals */}
-              <div style={{ background: '#ECFDF5', border: '1px solid #10B981', borderRadius: '8px', padding: '16px', marginTop: '4px' }}>
-                {[
-                  { label: 'Total freight cost', val: selectedInvoice.amount },
-                  { label: 'Subtotal (freight + valuation + ODA)', val: selectedInvoice.amount + 50 },
-                  { label: 'VAT (12% on subtotal)', val: selectedInvoice.vatAmount },
-                  { label: 'Fuel surcharge (15% of freight)', val: selectedInvoice.surchargeAmount },
-                ].map((row, i) => (
-                  <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '12px', marginBottom: '12px', borderBottom: '1px solid #D1FAE5', fontSize: '12px', color: '#064E3B' }}>
-                    <span>{row.label}</span>
-                    <span style={{ fontWeight: 600 }}>₱{row.val.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
-                  </div>
-                ))}
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '16px', color: '#047857', paddingTop: '4px' }}>
-                  <span style={{ fontWeight: 800 }}>Grand total</span>
-                  <span style={{ fontWeight: 800 }}>₱{selectedInvoice.totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+              {invoiceWaybills.length === 0 && (
+                <div style={{ padding: '16px', textAlign: 'center', color: '#94A3B8', fontSize: '13px' }}>
+                  No linked waybill lines found.
                 </div>
+              )}
+            </div>
+
+            {selectedInvoice.status === 'Pending Approval' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', borderTop: '1px solid #E2E8F0', paddingTop: '24px' }}>
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <Button
+                    title="Return for Revision"
+                    variant={reviewAction === 'reject' ? 'primary' : 'secondary'}
+                    icon="ti-arrow-back-up"
+                    onClick={() => setReviewAction('reject')}
+                  />
+                  <Button
+                    title="Approve Invoice"
+                    variant="primary"
+                    icon="ti-check"
+                    onClick={() => handleApprove(selectedInvoice)}
+                  />
+                </div>
+
+                {reviewAction === 'reject' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <label style={{ fontSize: '12px', fontWeight: 700, color: '#0F172A' }}>Remarks for Revision <span style={{ color: 'red' }}>*</span></label>
+                    <textarea
+                      value={remarks}
+                      onChange={e => setRemarks(e.target.value)}
+                      placeholder="Specify what needs correction..."
+                      style={{ width: '100%', padding: '12px', borderRadius: 8, border: '1px solid #CBD5E1', minHeight: 80 }}
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                      <Button title="Cancel" variant="secondary" onClick={() => { setReviewAction(''); setRemarks(''); }} />
+                      <Button title="Confirm Return" variant="primary" onClick={() => handleReject(selectedInvoice)} />
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
-
-            <hr style={{ border: 0, borderTop: '1px solid #E2E8F0', margin: '24px 0 16px 0' }} />
-
-            <div>
-              <h4 style={{ margin: '0 0 8px', fontSize: '0.875rem', fontWeight: 800, color: '#0F172A' }}>Review Decision</h4>
-              <select
-                style={{ padding: '10px', borderRadius: '8px', border: '1px solid #CBD5E1', width: '100%', outline: 'none', fontSize: '14px', marginBottom: '16px' }}
-                value={reviewAction}
-                onChange={e => setReviewAction(e.target.value)}
-              >
-                <option value="">-- Select Action --</option>
-                <option value="Approved">Approve Invoice</option>
-                <option value="Needs Revision">Return for Revision / Reject</option>
-              </select>
-
-              <h4 style={{ margin: '0 0 8px', fontSize: '0.875rem', fontWeight: 800, color: '#0F172A' }}>Remarks (optional)</h4>
-              <textarea
-                style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #CBD5E1', outline: 'none', fontSize: '14px', minHeight: '80px', resize: 'vertical' }}
-                value={remarks}
-                onChange={e => setRemarks(e.target.value)}
-                placeholder="Notes for this decision..."
-              />
-            </div>
-
-          </div>
-
-          <div style={{ padding: '24px 32px', borderTop: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', gap: '16px', background: '#fff', borderBottomLeftRadius: '12px', borderBottomRightRadius: '12px', position: 'sticky', bottom: 0 }}>
-            <button
-              onClick={() => { setSelectedInvoice(null); setRemarks(''); setReviewAction(''); setExpandedWaybills({}); }}
-              style={{ flex: 1, padding: '12px', background: '#fff', border: '1px solid #CBD5E1', borderRadius: '8px', color: '#0F172A', fontWeight: 800, fontSize: '14px', cursor: 'pointer' }}
-            >
-              Close
-            </button>
-            <button
-              onClick={() => {
-                if (reviewAction === 'Approved') handleApprove(selectedInvoice!);
-                else if (reviewAction === 'Needs Revision') handleReject(selectedInvoice!);
-                else toast.error('Please select a review action from the dropdown', 'Error');
-              }}
-              style={{ flex: 1, padding: '12px', background: '#10B981', border: '1px solid #10B981', borderRadius: '8px', color: '#fff', fontWeight: 800, fontSize: '14px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
-            >
-              <i className="ti ti-send" /> Submit Review / Decision
-            </button>
+            )}
           </div>
         </div>
       </div>,
@@ -336,95 +305,40 @@ export const InvoiceReview: React.FC = () => {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24, paddingBottom: 64 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {selectedClientId && viewClient ? (
+        <ClientInfoCard client={viewClient} onBack={() => navigate('/invoice-review')} />
+      ) : null}
 
-      {viewClient && <ClientInfoCard client={viewClient} />}
-
-      {/* KPIs */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
-        <StatusCard label="Total Reviewed" value={`₱${totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`} icon="ti-coin" variant="new" />
-        <StatusCard label="Pending Approval" value={pendingCount} icon="ti-clock-hour-4" variant="warning" />
-        <StatusCard label="Approved" value={approvedCount} icon="ti-check" variant="success" />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+        <KpiCard label="Pending Approval" value={pendingCount} icon="ti-clock" variant="warning" />
+        <KpiCard label="Approved Invoices" value={approvedCount} icon="ti-check" variant="success" />
+        <KpiCard label="Total Invoiced Value" value={formatCurrency(totalAmount)} icon="ti-receipt" variant="info" />
       </div>
 
-      {viewClient ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {sortedInvoices.length === 0 ? (
-            <Card><div style={{ padding: 24, textAlign: 'center', color: '#64748B' }}>No invoices in the queue.</div></Card>
-          ) : (
-            sortedInvoices.map(inv => {
-              const client = clients.find(c => c.id === inv.clientId);
-              const isPending = inv.status === 'Pending Approval';
-
-              return (
-                <Card key={inv.id}>
-                  <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <div>
-                        {viewClient ? (
-                          <h3 style={{ margin: '0 0 4px 0', fontSize: '1.15rem', color: '#0F172A', fontWeight: 800 }}>Invoice {inv.invoiceNumber}</h3>
-                        ) : (
-                          <>
-                            <h3 style={{ margin: '0 0 2px 0', fontSize: '1.15rem', color: '#0F172A', fontWeight: 800 }}>{client?.name || 'Unknown Client'}</h3>
-                            <p style={{ margin: 0, fontSize: '0.75rem', color: '#64748B', fontWeight: 600 }}>{inv.invoiceNumber}</p>
-                          </>
-                        )}
-                      </div>
-                      <div>
-                        {isPending ? (
-                          <span style={{ padding: '2px 8px', borderRadius: '999px', background: '#FEF2F2', color: '#EF4444', fontSize: '0.65rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                            <i className="ti-clock" style={{ fontSize: '0.8rem' }} />
-                            Pending Review
-                          </span>
-                        ) : (
-                          <span style={{ padding: '2px 8px', borderRadius: '999px', background: '#F1F5F9', color: '#64748B', fontSize: '0.65rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                            <i className="ti-check" style={{ fontSize: '0.8rem' }} />
-                            {inv.status}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 0 }}>
-                      <div>
-                        <span style={{ display: 'block', fontSize: '0.65rem', fontWeight: 800, color: '#64748B', textTransform: 'uppercase', marginBottom: 2, letterSpacing: '0.5px' }}>Outstanding Balance</span>
-                        <span style={{ fontSize: '1.05rem', fontWeight: 800, color: '#0F172A' }}>₱{inv.totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
-                      </div>
-                      <div>
-                        <span style={{ display: 'block', fontSize: '0.65rem', fontWeight: 800, color: '#64748B', textTransform: 'uppercase', marginBottom: 2, letterSpacing: '0.5px' }}>Due Date</span>
-                        <span style={{ fontSize: '0.95rem', fontWeight: 800, color: '#0F172A' }}>{new Date(inv.dueDate).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' })}</span>
-                      </div>
-                    </div>
-
-                    {isPending ? (
-                      <div style={{ marginTop: 4 }}>
-                        <button
-                          onClick={() => setSelectedInvoice(inv)}
-                          style={{ width: '100%', padding: '8px', borderRadius: '6px', background: '#0D9488', color: '#fff', fontSize: '0.8rem', fontWeight: 800, border: 'none', cursor: 'pointer', transition: 'background 0.2s' }}
-                          onMouseEnter={(e) => e.currentTarget.style.background = '#0F766E'}
-                          onMouseLeave={(e) => e.currentTarget.style.background = '#0D9488'}
-                        >
-                          Review Invoice
-                        </button>
-                      </div>
-                    ) : (
-                      <div style={{ marginTop: 4 }}>
-                        <button
-                          onClick={() => setSelectedInvoice(inv)}
-                          style={{ width: '100%', padding: '8px', borderRadius: '6px', background: '#10B981', color: '#fff', fontSize: '0.8rem', fontWeight: 800, border: 'none', cursor: 'pointer', transition: 'background 0.2s' }}
-                          onMouseEnter={(e) => e.currentTarget.style.background = '#059669'}
-                          onMouseLeave={(e) => e.currentTarget.style.background = '#10B981'}
-                        >
-                          View Details
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </Card>
-              );
-            })
-          )}
-        </div>
+      {selectedClientId ? (
+        <TableContainer>
+          <DataTable
+            title="Invoices for Review"
+            rowKey="id"
+            data={sortedInvoices}
+            columns={[
+              { key: 'invoiceNumber', label: 'Invoice No.', sortable: true },
+              { key: 'billingPeriod', label: 'Billing Period' },
+              { key: 'createdAt', label: 'Date', render: (row: any) => formatDate(row.createdAt) },
+              { key: 'dueDate', label: 'Due Date', render: (row: any) => formatDate(row.dueDate) },
+              { key: 'totalAmount', label: 'Amount', render: (row: any) => formatCurrency(row.totalAmount) },
+              { key: 'status', label: 'Status', render: (row: any) => <StatusBadge status={row.status} /> }
+            ]}
+            actions={[
+              {
+                label: 'Review',
+                icon: 'ti-file-search',
+                onClick: (row: any) => setSelectedInvoice(row)
+              }
+            ]}
+          />
+        </TableContainer>
       ) : (
         <TableContainer>
           <DataTable
@@ -432,39 +346,24 @@ export const InvoiceReview: React.FC = () => {
             rowKey="id"
             data={enrichedClients}
             searchPlaceholder="Search clients..."
-            filters={[
-              {
-                key: 'status',
-                label: 'Status',
-                options: [
-                  { label: 'Pending', value: 'Pending' },
-                  { label: 'Approved', value: 'Approved' }
-                ],
-                filterFn: (row, value) => {
-                  if (value === 'Pending') return row.pendingCount > 0;
-                  if (value === 'Approved') return row.pendingCount === 0;
-                  return true;
-                }
-              }
-            ]}
             columns={[
               { 
                 key: 'clientName', 
                 label: 'Client',
-                render: (row) => <span style={{ fontWeight: 'bold' }}>{row.clientName}</span>
+                render: (row: any) => <span style={{ fontWeight: 'bold' }}>{row.clientName}</span>
               },
               {
-                key: 'status', label: 'Status', render: (row) => (
+                key: 'status', label: 'Status', render: (row: any) => (
                   <StatusBadge status={row.pendingCount > 0 ? 'Pending' : 'Approved'} />
                 )
               },
-              { key: 'totalAmount', label: 'Total Value', render: (row) => `₱${row.totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}` }
+              { key: 'totalAmount', label: 'Total Value', render: (row: any) => formatCurrency(row.totalAmount) }
             ]}
             actions={[
               {
                 label: 'View Details',
                 icon: 'ti-eye',
-                onClick: (row) => navigate(`/invoice-review/${row.id}`)
+                onClick: (row: any) => navigate(`/invoice-review/${row.id}`)
               }
             ]}
           />
@@ -472,7 +371,6 @@ export const InvoiceReview: React.FC = () => {
       )}
 
       {renderModal()}
-
     </div>
   );
 };

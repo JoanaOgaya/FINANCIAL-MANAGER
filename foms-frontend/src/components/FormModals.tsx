@@ -508,7 +508,7 @@ export const FormModals: React.FC = () => {
   };
 
   const addToast = (title: string, description: string, type: 'success' | 'error' = 'success') => {
-    const id = Math.random().toString(36).substring(2, 9);
+    const id = `${Date.now()}_${toasts.length + 1}`;
     setToasts(prev => [...prev, { id, title, description, type }]);
     setTimeout(() => setToasts(prev => prev.map(t => t.id === id ? { ...t, leaving: true } : t)), TOAST_LIFETIME_MS - TOAST_EXIT_MS);
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), TOAST_LIFETIME_MS);

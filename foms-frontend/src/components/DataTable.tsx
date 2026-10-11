@@ -8,7 +8,7 @@ import React, {
 } from "react";
 import Button from "./Buttons";
 import Dropdown from "./Dropdown";
-import ConfirmModal from "./ConfirmModal";
+import ConfirmModal from "./shared/ConfirmModal";
 import { useToast } from "./ToastContext";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";

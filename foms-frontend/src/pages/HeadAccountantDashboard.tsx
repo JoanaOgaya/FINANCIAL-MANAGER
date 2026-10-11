@@ -2,11 +2,20 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useAuth } from '../context/AuthContext';
-import { useAppData } from '../context/AppDataContext';
-import { StatusCard } from '../components/StatusCard';
+import { useQuery } from '../hooks/useQuery';
+import { invoicesService } from '../services/invoicesService';
+import { paymentsService } from '../services/paymentsService';
+import { arService } from '../services/arService';
+import { adjustmentsService } from '../services/adjustmentsService';
+import { speedpayService } from '../services/speedpayService';
+import { clientsService } from '../services/clientsService';
+import { auditLogsService } from '../services/auditLogsService';
+import { KpiCard } from '../components/shared/KpiCard';
 import { Card } from '../components/Card';
 import { RecentActivity } from '../components/RecentActivity';
 import { DonutWidget } from '../components/DashboardCharts';
+import { formatDate } from '../utils/format';
+import type { Invoice, Payment, ARRecord, FinancialAdjustment, SpeedPaySubmission, Client, AuditLog } from '../types/entities';
 import {
   DashboardBanner, WorkQueue, QuickActions, peso, QueueItem,
 } from '../components/DashboardWidgets';
@@ -19,15 +28,30 @@ import {
 export const HeadAccountantDashboard: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { invoices, auditLogs, arRecords, speedPay, clients, payments, financialAdjustments } = useAppData();
 
-  const clientName = (id: string) => clients?.find((c: any) => c.id === id)?.name || id;
+  const { data: invoicesData } = useQuery('head:invoices', () => invoicesService.list({ pageSize: 100 }));
+  const { data: paymentsData } = useQuery('head:payments', () => paymentsService.list({ pageSize: 100 }));
+  const { data: arData } = useQuery('head:ar', () => arService.records({ pageSize: 100 }));
+  const { data: adjustmentsData } = useQuery('head:adjustments', () => adjustmentsService.list({ pageSize: 100 }));
+  const { data: speedPayData } = useQuery('head:speedpay', () => speedpayService.list({ pageSize: 100 }));
+  const { data: clientsData } = useQuery('head:clients', () => clientsService.list({ pageSize: 100 }));
+  const { data: auditData } = useQuery('head:audit', () => auditLogsService.list({ pageSize: 20 }));
+
+  const invoices: Invoice[] = invoicesData?.items || [];
+  const payments: Payment[] = paymentsData?.items || [];
+  const arRecords: ARRecord[] = arData?.items || [];
+  const financialAdjustments: FinancialAdjustment[] = adjustmentsData?.items || [];
+  const speedPay: SpeedPaySubmission[] = speedPayData?.items || [];
+  const clients: Client[] = clientsData?.items || [];
+  const auditLogs: AuditLog[] = auditData?.items || [];
+
+  const clientName = (id: string) => clients.find(c => c.id === id)?.name || id;
   const firstName = (user?.fullName || 'Head Accountant').split(' ')[0];
 
   const pendingInvoices = invoices.filter(i => i.status === 'Pending Approval');
   const pendingPayments = payments.filter(p => p.status === 'Pending Validation');
-  const pendingAdjustments = (financialAdjustments || []).filter(a => a.status === 'Pending Approval');
-  const pendingSpeedPay = (speedPay || []).filter((s: any) => s.status === 'Pending Validation');
+  const pendingAdjustments = financialAdjustments.filter(a => a.status === 'Pending Approval');
+  const pendingSpeedPay = speedPay.filter(s => s.status === 'Pending Validation');
 
   const totalPending = pendingInvoices.length + pendingPayments.length + pendingAdjustments.length + pendingSpeedPay.length;
   const valueAwaiting = pendingInvoices.reduce((s, i) => s + i.totalAmount, 0);
@@ -38,10 +62,10 @@ export const HeadAccountantDashboard: React.FC = () => {
   const decided = approved + returned;
   const approvalRate = decided > 0 ? Math.round((approved / decided) * 100) : 0;
 
-  const totalBalance = arRecords?.reduce((s: number, r: any) => s + (r.outstandingBalance || 0), 0) || 0;
+  const totalBalance = arRecords.reduce((s: number, r: ARRecord) => s + (r.outstandingBalance || 0), 0);
   const overdueInvoices = invoices.filter(i => i.status === 'Overdue' || i.status === 'Outstanding').length;
 
-  const nearDueAccounts = (arRecords || []).filter(r => {
+  const nearDueAccounts = arRecords.filter(r => {
     if (r.outstandingBalance <= 0 || r.status === 'Overdue' || r.status === 'Outstanding') return false;
     const inv = invoices.find(i => i.id === r.invoiceId);
     const dueDate = r.dueDate || inv?.dueDate;
@@ -73,11 +97,11 @@ export const HeadAccountantDashboard: React.FC = () => {
       subtitle: a.reason,
       amount: a.amount, actionLabel: 'Review', onClick: () => navigate('/adjustments'),
     })),
-    ...pendingSpeedPay.map((s: any) => ({
+    ...pendingSpeedPay.map(s => ({
       id: `sp-${s.id}`, tag: 'SpeedPay', tagColor: '#B45309', tagBg: '#FEF3C7',
       title: `${s.id}${s.clientName ? ' — ' + s.clientName : ''}`,
       subtitle: 'Online payment awaiting validation',
-      amount: typeof s.amount === 'number' ? s.amount : undefined,
+      amount: typeof s.amountPaid === 'number' ? s.amountPaid : undefined,
       actionLabel: 'Validate', onClick: () => navigate('/speedpay-validation'),
     })),
   ];
@@ -128,21 +152,21 @@ export const HeadAccountantDashboard: React.FC = () => {
       />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
-        <StatusCard label="Invoices for Approval" value={pendingInvoices.length} icon="ti-file-check" variant="warning"
+        <KpiCard label="Invoices for Approval" value={pendingInvoices.length} icon="ti-file-check" variant="warning"
           trend={{ type: 'neutral', value: peso(valueAwaiting) }} periodText="awaiting decision" onClick={() => navigate('/invoice-review')} />
-        <StatusCard label="Payments to Validate" value={pendingPayments.length + pendingSpeedPay.length} icon="ti-cash" variant="info"
+        <KpiCard label="Payments to Validate" value={pendingPayments.length + pendingSpeedPay.length} icon="ti-cash" variant="info"
           trend={{ type: 'neutral', value: `${pendingSpeedPay.length} SpeedPay` }} periodText="manual + online" onClick={() => navigate('/payments')} />
-        <StatusCard label="Adjustments to Review" value={pendingAdjustments.length} icon="ti-adjustments-alt" variant="new"
+        <KpiCard label="Adjustments to Review" value={pendingAdjustments.length} icon="ti-adjustments-alt" variant="new"
           trend={{ type: 'neutral', value: 'Credit memos' }} periodText="pending approval" onClick={() => navigate('/adjustments')} />
-        <StatusCard label="Approval Rate" value={`${approvalRate}%`} icon="ti-chart-pie" variant="success"
+        <KpiCard label="Approval Rate" value={`${approvalRate}%`} icon="ti-chart-pie" variant="success"
           trend={{ type: 'neutral', value: `${returned} returned` }} periodText={`of ${decided} decisions`} onClick={() => navigate('/review-history')} />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 20, alignItems: 'start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           <WorkQueue
-            title="Approval Queue"
-            subtitle="Everything submitted to you, in one place"
+            title="Needs your attention"
+            subtitle="Approval queue: everything submitted to you awaiting decision"
             icon="ti-gavel" iconColor="#0F766E" iconBg="#CCFBF1"
             items={queue}
             emptyText="Queue is clear — no pending approvals."
@@ -203,12 +227,12 @@ export const HeadAccountantDashboard: React.FC = () => {
               <span onClick={() => navigate('/accounts-receivable')} style={{ color: '#0D9488', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' }}>View AR →</span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {nearDueAccounts.slice(0, 4).map((a: any) => (
-                <div key={a.id} onClick={() => navigate(`/accounts-receivable/${a.clientId}`)}
+              {nearDueAccounts.slice(0, 4).map((a) => (
+                <div key={a.id} onClick={() => navigate(`/accounts-receivable`)}
                   style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', border: '1px solid #E2E8F0', borderRadius: 8, cursor: 'pointer' }}>
                   <div>
                     <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#0F172A' }}>{a.invoiceNumber} — {clientName(a.clientId)}</div>
-                    <div style={{ fontSize: '0.78rem', color: '#64748B' }}>Due {new Date(a.dueDate).toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' })}</div>
+                    <div style={{ fontSize: '0.78rem', color: '#64748B' }}>Due {formatDate(a.dueDate)}</div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <span style={{ fontWeight: 700, color: '#0F172A', fontSize: '0.85rem' }}>{peso(a.outstandingBalance)}</span>
@@ -235,8 +259,7 @@ export const HeadAccountantDashboard: React.FC = () => {
             title="Jump To"
             actions={[
               { label: 'Invoice Review', description: 'Approve or return invoices', icon: 'ti-file-check', color: '#0D9488', bg: '#CCFBF1', onClick: () => navigate('/invoice-review') },
-              { label: 'Flagged Duplicates', description: 'Confirm suspected duplicates', icon: 'ti-alert-triangle', color: '#DC2626', bg: '#FEE2E2', onClick: () => navigate('/flagged-duplicates') },
-              { label: 'For Review', description: 'Items escalated to you', icon: 'ti-clipboard-check', color: '#7C3AED', bg: '#EDE9FE', onClick: () => navigate('/for-review') },
+              { label: 'For Review', description: 'Approve or return duplicate decisions', icon: 'ti-clipboard-check', color: '#7C3AED', bg: '#EDE9FE', onClick: () => navigate('/flagged-duplicates') },
               { label: 'Reports', description: 'Financial summaries', icon: 'ti-chart-bar', color: '#2563EB', bg: '#DBEAFE', onClick: () => navigate('/reports') },
             ]}
           />
