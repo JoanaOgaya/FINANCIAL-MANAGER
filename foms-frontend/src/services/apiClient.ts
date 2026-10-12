@@ -41,11 +41,22 @@ export const session = {
 let unauthorizedListener: (() => void) | null = null;
 export function onUnauthorized(listener: (() => void) | null) { unauthorizedListener = listener; }
 
-const instance = axios.create({ baseURL, headers: { 'Content-Type': 'application/json' } });
+const instance = axios.create({ baseURL });
 
 instance.interceptors.request.use((config) => {
   const token = session.get()?.accessToken;
   if (token) config.headers.Authorization = `Bearer ${token}`;
+
+  // If payload is FormData, remove Content-Type so browser can set multipart/form-data with boundary
+  if (config.data instanceof FormData) {
+    if (config.headers) {
+      delete config.headers['Content-Type'];
+      delete config.headers['content-type'];
+    }
+  } else if (config.headers && !config.headers['Content-Type'] && !config.headers['content-type']) {
+    config.headers['Content-Type'] = 'application/json';
+  }
+
   return config;
 });
 

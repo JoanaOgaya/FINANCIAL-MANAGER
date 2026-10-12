@@ -137,7 +137,11 @@ public class AiFeaturesController : ApiControllerBase
     [HttpPost("documents/upload")]
     public async Task<IActionResult> UploadDocument([FromForm] IFormFile? file, [FromForm] string? documentType)
     {
-        var targetFile = file ?? Request.Form.Files.FirstOrDefault();
+        IFormFile? targetFile = file;
+        if (targetFile == null && Request.HasFormContentType && Request.Form.Files.Count > 0)
+        {
+            targetFile = Request.Form.Files.FirstOrDefault();
+        }
         var validation = await ValidateDocumentInternalAsync(targetFile);
 
         if (!validation.IsAllowed)

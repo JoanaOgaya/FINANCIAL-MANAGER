@@ -470,7 +470,11 @@ public class AiDuplicatesController : ApiControllerBase
     [HttpPost("/api/ai/documents/validate")]
     public async Task<IActionResult> ValidateDocument([FromForm] IFormFile? file, [FromForm] IFormFile? document)
     {
-        var targetFile = file ?? document ?? Request.Form.Files.FirstOrDefault();
+        IFormFile? targetFile = file ?? document;
+        if (targetFile == null && Request.HasFormContentType && Request.Form.Files.Count > 0)
+        {
+            targetFile = Request.Form.Files.FirstOrDefault();
+        }
         var validation = await ValidateDocumentInternalAsync(targetFile);
 
         if (!validation.IsAllowed)
@@ -509,7 +513,11 @@ public class AiDuplicatesController : ApiControllerBase
     [HttpPost("/api/ai/documents/scan")]
     public async Task<IActionResult> ScanDocument([FromForm] IFormFile? file, [FromForm] IFormFile? document, [FromQuery] string? scope)
     {
-        var targetFile = file ?? document ?? Request.Form.Files.FirstOrDefault();
+        IFormFile? targetFile = file ?? document;
+        if (targetFile == null && Request.HasFormContentType && Request.Form.Files.Count > 0)
+        {
+            targetFile = Request.Form.Files.FirstOrDefault();
+        }
         var validation = await ValidateDocumentInternalAsync(targetFile);
 
         if (!validation.IsAllowed)
