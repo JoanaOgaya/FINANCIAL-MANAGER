@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../components/ToastContext';
 import { canDo, getDuplicateScope } from '../utils/roleAccess';
 import { duplicatesService, type DuplicateScanResult } from '../services/duplicates.service';
 
@@ -188,11 +189,31 @@ const CameraModal: React.FC<{
 /* ─────────────────────────────────────────────
    Main Page
 ───────────────────────────────────────────── */
+export type ScanState =
+  | 'IDLE'
+  | 'UPLOADING'
+  | 'VALIDATING_DOCUMENT'
+  | 'INVALID_DOCUMENT'
+  | 'VALID_DOCUMENT'
+  | 'SCANNING_DUPLICATE'
+  | 'DUPLICATE_FOUND'
+  | 'UNIQUE_DOCUMENT'
+  | 'SCAN_ERROR';
+
 const AIDuplicateScan: React.FC = () => {
   const { user } = useAuth();
   const canScan = canDo(user?.role, 'duplicateScan', 'scan');
   const scope = getDuplicateScope(user?.role);
   const isAssistantFM = user?.role === 'ASSISTANT_FM';
+
+  const { toast } = useToast();
+  const [scanState, setScanState] = useState<ScanState>('IDLE');
+  const [validationError, setValidationError] = useState<{
+    title: string;
+    message: string;
+    reason?: string;
+    detectedType?: string;
+  } | null>(null);
 
   const [isDragging, setIsDragging] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -207,33 +228,110 @@ const AIDuplicateScan: React.FC = () => {
     e.preventDefault(); setIsDragging(false);
     if (!canScan) return;
     const file = e.dataTransfer.files[0];
-    if (file) { setUploadedFile(file); setScanResult(null); }
+    if (file) {
+      setUploadedFile(file);
+      setScanResult(null);
+      setValidationError(null);
+      setScanState('IDLE');
+    }
   }, [canScan]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!canScan) return;
     const file = e.target.files?.[0];
-    if (file) { setUploadedFile(file); setScanResult(null); }
+    if (file) {
+      setUploadedFile(file);
+      setScanResult(null);
+      setValidationError(null);
+      setScanState('IDLE');
+    }
   };
 
   const handleScanDocument = async () => {
     if (!uploadedFile || !canScan) return;
     setIsScanning(true);
+    setScanState('VALIDATING_DOCUMENT');
     setScanResult(null);
+    setValidationError(null);
+
     try {
       const formData = new FormData();
+      formData.append('file', uploadedFile);
       formData.append('document', uploadedFile);
-      const res = await duplicatesService.scan(formData, scope);
+
+      // STEP 1: AI Document Classification & Validation Gate
+      let validation: any = null;
+      try {
+        validation = await duplicatesService.validate(formData);
+      } catch (valErr: any) {
+        if (valErr?.status === 422 || valErr?.data?.status === 'INVALID_DOCUMENT' || valErr?.data?.isAllowed === false) {
+          setIsScanning(false);
+          setScanState('INVALID_DOCUMENT');
+          const details = valErr?.data?.details || {};
+          setValidationError({
+            title: 'Invalid Document Uploaded',
+            message: valErr?.data?.message || 'Only official receipts, invoices, billing statements, or payment-related finance documents are allowed. Please upload a valid FOMS financial document.',
+            reason: details.reason || 'The uploaded image does not appear to be an invoice, official receipt, billing statement, or payment-related document. Duplicate scanning was stopped to protect the accuracy of the AI results.',
+            detectedType: details.detectedType || valErr?.data?.documentType || 'UNSUPPORTED_CONTENT'
+          });
+          toast.error('Invalid file content. Please upload an invoice, official receipt, or payment document only.', 'Invalid Document Uploaded');
+          return;
+        }
+        throw valErr;
+      }
+
+      if (validation && (!validation.isAllowed || validation.status === 'INVALID_DOCUMENT')) {
+        setIsScanning(false);
+        setScanState('INVALID_DOCUMENT');
+        setValidationError({
+          title: 'Invalid Document Uploaded',
+          message: validation.message || 'Only official receipts, invoices, billing statements, or payment-related finance documents are allowed. Please upload a valid FOMS financial document.',
+          reason: validation.reason || 'The uploaded image does not appear to be an invoice, official receipt, billing statement, or payment-related document. Duplicate scanning was stopped to protect the accuracy of the AI results.',
+          detectedType: validation.documentType || 'INVALID_OR_UNRELATED_IMAGE'
+        });
+        toast.error('Invalid file content. Please upload an invoice, official receipt, or payment document only.', 'Invalid Document Uploaded');
+        return;
+      }
+
+      // STEP 2: Document is Valid -> Proceed to Duplicate Detection
+      setScanState('SCANNING_DUPLICATE');
+      const scanRes = await duplicatesService.scan(formData, scope);
       setIsScanning(false);
-      setScanResult(res);
-    } catch {
+
+      if (scanRes.result === 'duplicate') {
+        setScanState('DUPLICATE_FOUND');
+        setScanResult(scanRes);
+        toast.warning(`Possible duplicate detected matching ${scanRes.matched_record_id || 'an existing record'}.`, 'Duplicate Detected');
+      } else {
+        setScanState('UNIQUE_DOCUMENT');
+        setScanResult(scanRes);
+        toast.success('Document verified as unique. No duplicate records found in FOMS.', 'Scan Completed');
+      }
+    } catch (err: any) {
       setIsScanning(false);
-      setScanResult({ result: 'unique', confidence: 100, message: 'Document analyzed as unique.' });
+      if (err?.status === 422 || err?.data?.status === 'INVALID_DOCUMENT' || err?.data?.isAllowed === false) {
+        setScanState('INVALID_DOCUMENT');
+        const details = err?.data?.details || {};
+        setValidationError({
+          title: 'Invalid Document Uploaded',
+          message: err?.data?.message || 'Only official receipts, invoices, billing statements, or payment-related finance documents are allowed. Please upload a valid FOMS financial document.',
+          reason: details.reason || 'The uploaded image does not appear to be an invoice, official receipt, billing statement, or payment-related document. Duplicate scanning was stopped to protect the accuracy of the AI results.',
+          detectedType: details.detectedType || err?.data?.documentType || 'UNSUPPORTED_CONTENT'
+        });
+        toast.error('Invalid file content. Please upload an invoice, official receipt, or payment document only.', 'Invalid Document Uploaded');
+      } else {
+        setScanState('SCAN_ERROR');
+        toast.error(err?.message || 'An error occurred during duplicate scan.', 'Scan Error');
+      }
     }
   };
 
   const handleReset = () => {
-    setUploadedFile(null); setScanResult(null); setIsScanning(false);
+    setUploadedFile(null);
+    setScanResult(null);
+    setValidationError(null);
+    setIsScanning(false);
+    setScanState('IDLE');
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -398,15 +496,115 @@ const AIDuplicateScan: React.FC = () => {
             <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #E2E8F0', padding: '28px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
               <div style={{ width: 48, height: 48, borderRadius: '50%', border: '4px solid #E2E8F0', borderTopColor: '#0D9488', animation: 'spin 1s linear infinite' }} />
               <div>
-                <div style={{ fontWeight: 700, color: '#0F172A', textAlign: 'center', marginBottom: 4 }}>AI Scanning in Progress...</div>
-                <div style={{ fontSize: '0.875rem', color: '#64748B', textAlign: 'center' }}>Analyzing document signatures and database records</div>
+                <div style={{ fontWeight: 700, color: '#0F172A', textAlign: 'center', marginBottom: 4 }}>
+                  {scanState === 'VALIDATING_DOCUMENT' ? 'Validating Document Type...' : 'AI Duplicate Scanning in Progress...'}
+                </div>
+                <div style={{ fontSize: '0.875rem', color: '#64748B', textAlign: 'center' }}>
+                  {scanState === 'VALIDATING_DOCUMENT' ? 'Verifying official receipt/invoice credentials before duplicate check' : 'Analyzing document signatures and database records'}
+                </div>
               </div>
               <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
             </div>
           )}
 
-          {/* Scan Result */}
-          {scanResult && !isScanning && (
+          {/* Invalid Document Error Card */}
+          {scanState === 'INVALID_DOCUMENT' && validationError && !isScanning && (
+            <div style={{
+              background: '#fff',
+              borderRadius: '14px',
+              border: '1.5px solid #FECACA',
+              padding: '24px 22px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 16,
+              boxShadow: '0 4px 14px rgba(239, 68, 68, 0.08)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+                <div style={{
+                  width: 50,
+                  height: 50,
+                  borderRadius: '50%',
+                  background: '#FEF2F2',
+                  border: '1.5px solid #FEE2E2',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0
+                }}>
+                  <i className="ti ti-alert-triangle" style={{ fontSize: '24px', color: '#EF4444' }} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4, flexWrap: 'wrap' }}>
+                    <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: '#991B1B' }}>
+                      {validationError.title}
+                    </h3>
+                    {validationError.detectedType && (
+                      <span style={{
+                        fontSize: '0.72rem',
+                        fontWeight: 700,
+                        color: '#DC2626',
+                        background: '#FEE2E2',
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        letterSpacing: '0.04em'
+                      }}>
+                        {validationError.detectedType.replace(/_/g, ' ')}
+                      </span>
+                    )}
+                  </div>
+                  <p style={{ margin: '0 0 8px 0', fontSize: '0.875rem', color: '#B91C1C', fontWeight: 600, lineHeight: 1.5 }}>
+                    {validationError.message}
+                  </p>
+                  <p style={{ margin: 0, fontSize: '0.825rem', color: '#64748B', lineHeight: 1.6 }}>
+                    {validationError.reason}
+                  </p>
+                </div>
+              </div>
+
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '12px 16px',
+                background: '#FEF2F2',
+                borderRadius: '8px',
+                border: '1px solid #FEE2E2',
+                flexWrap: 'wrap',
+                gap: 12
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: '#7F1D1D' }}>
+                  <i className="ti ti-shield-check" style={{ fontSize: '16px', color: '#EF4444' }} />
+                  <span><strong>AI Guardrail Active:</strong> Duplicate scanning was stopped to protect the accuracy of the AI results.</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleReset();
+                    setTimeout(() => fileInputRef.current?.click(), 100);
+                  }}
+                  style={{
+                    padding: '8px 18px',
+                    background: '#DC2626',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontWeight: 700,
+                    fontSize: '0.85rem',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6
+                  }}
+                >
+                  <i className="ti ti-upload" />
+                  Upload Valid Document
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Valid Scan Result (Only shown when document is valid and scan completed) */}
+          {scanResult && !isScanning && (scanState === 'DUPLICATE_FOUND' || scanState === 'UNIQUE_DOCUMENT') && (
             <div style={{ background: '#fff', borderRadius: '12px', border: `1.5px solid ${scanResult.result === 'duplicate' ? '#FECACA' : '#BBF7D0'}`, padding: '24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
                 <div style={{ width: 48, height: 48, borderRadius: '50%', background: scanResult.result === 'duplicate' ? '#FEF2F2' : '#F0FDF4', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -414,7 +612,7 @@ const AIDuplicateScan: React.FC = () => {
                 </div>
                 <div>
                   <div style={{ fontWeight: 800, fontSize: '1rem', color: scanResult.result === 'duplicate' ? '#EF4444' : '#16A34A', marginBottom: 2 }}>
-                    {scanResult.result === 'duplicate' ? 'Duplicate Detected' : 'Unique Document'}
+                    {scanResult.result === 'duplicate' ? 'Possible Duplicate Detected' : 'Unique Document'}
                   </div>
                   <div style={{ fontSize: '0.875rem', color: '#64748B' }}>
                     {scanResult.message || (scanResult.result === 'duplicate' ? 'This document matches an existing record.' : 'No duplicate found. This document appears to be unique.')}

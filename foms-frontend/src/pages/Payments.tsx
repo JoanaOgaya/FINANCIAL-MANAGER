@@ -212,6 +212,33 @@ const PaymentsContent: React.FC = () => {
       setCheckingProgress(60);
       const formData = new FormData();
       formData.append('file', file);
+      formData.append('document', file);
+
+      // 1. Validation Gate
+      let validation: any = null;
+      try {
+        validation = await duplicatesService.validate(formData);
+      } catch (valErr: any) {
+        if (valErr?.status === 422 || valErr?.data?.status === 'INVALID_DOCUMENT' || valErr?.data?.isAllowed === false) {
+          setCheckingStep(0);
+          setCheckingProgress(100);
+          setScanResultMode('INVALID');
+          setOcrWarning(valErr?.data?.message || 'Only official receipts, invoices, billing statements, or payment-related finance documents are allowed. Please upload a valid FOMS financial document.');
+          toast.error('Invalid file content. Please upload an official receipt or invoice only.', 'Invalid Document Uploaded');
+          return;
+        }
+      }
+
+      if (validation && (!validation.isAllowed || validation.status === 'INVALID_DOCUMENT')) {
+        setCheckingStep(0);
+        setCheckingProgress(100);
+        setScanResultMode('INVALID');
+        setOcrWarning(validation.message || 'Only official receipts, invoices, billing statements, or payment-related finance documents are allowed. Please upload a valid FOMS financial document.');
+        toast.error('Invalid file content. Please upload an official receipt or invoice only.', 'Invalid Document Uploaded');
+        return;
+      }
+
+      // 2. Duplicate Detection (Only runs for valid financial documents)
       const res = await duplicatesService.scan(formData) as any;
       setCheckingStep(0);
       setCheckingProgress(100);
@@ -221,16 +248,19 @@ const PaymentsContent: React.FC = () => {
         setSimilarityScore(res.similarityScore || 95);
         setMatchedRecordDetails(res.matchedRecord || null);
         toast.warning('Duplicate detected. Review required.', 'AI Scan');
-      } else if (res?.isInvalid) {
-        setScanResultMode('INVALID');
-        setOcrWarning(res.warning || 'Only official receipts or invoices are allowed.');
       } else {
         setScanResultMode('CLEAR');
       }
-    } catch {
+    } catch (err: any) {
       setCheckingStep(0);
       setCheckingProgress(100);
-      setScanResultMode('CLEAR');
+      if (err?.status === 422 || err?.data?.status === 'INVALID_DOCUMENT') {
+        setScanResultMode('INVALID');
+        setOcrWarning(err?.data?.message || 'Only official receipts, invoices, billing statements, or payment-related finance documents are allowed.');
+        toast.error('Invalid file content. Please upload an official receipt or invoice only.', 'Invalid Document Uploaded');
+      } else {
+        setScanResultMode('CLEAR');
+      }
     }
   };
 

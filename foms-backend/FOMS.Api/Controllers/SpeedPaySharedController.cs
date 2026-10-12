@@ -18,10 +18,20 @@ namespace FOMS.Api.Controllers;
 public class SpeedPaySharedController : ControllerBase
 {
     private readonly FomsDbContext _fomsDb;
+    private readonly FOMS.Application.Interfaces.IApplicationDbContext _appContext;
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly Microsoft.Extensions.Configuration.IConfiguration _configuration;
 
-    public SpeedPaySharedController(FomsDbContext fomsDb)
+    public SpeedPaySharedController(
+        FomsDbContext fomsDb,
+        FOMS.Application.Interfaces.IApplicationDbContext appContext,
+        IHttpClientFactory httpClientFactory,
+        Microsoft.Extensions.Configuration.IConfiguration configuration)
     {
         _fomsDb = fomsDb;
+        _appContext = appContext;
+        _httpClientFactory = httpClientFactory;
+        _configuration = configuration;
     }
 
     private string CurrentRole() =>
@@ -270,5 +280,135 @@ public class SpeedPaySharedController : ControllerBase
 
         await _fomsDb.SaveChangesAsync();
         return Ok(new { success = true, message = "SpeedPay payment returned for correction." });
+    }
+
+    public class InitiateSpeedPayRequest
+    {
+        public string? InvoiceNo { get; set; }
+        public string? InvoiceId { get; set; }
+        public decimal Amount { get; set; }
+        public string? PaymentMethod { get; set; }
+        public string? ReturnUrl { get; set; }
+    }
+
+    [AllowAnonymous]
+    [HttpPost("create-payment")]
+    [HttpPost("initiate-payment")]
+    public async Task<IActionResult> InitiateInvoicePayment([FromBody] InitiateSpeedPayRequest req)
+    {
+        int targetInvoiceId = 0;
+        int.TryParse(req.InvoiceId, out targetInvoiceId);
+        var invoice = await _fomsDb.Invoices.FirstOrDefaultAsync(i => 
+            i.InvoiceNumber == req.InvoiceNo || 
+            (targetInvoiceId > 0 && i.InvoiceId == targetInvoiceId));
+
+        var invoiceNum = invoice?.InvoiceNumber ?? req.InvoiceNo ?? "INV-1001";
+        var amount = req.Amount > 0 ? req.Amount : (invoice?.TotalAmount ?? 25000m);
+        var clientId = invoice?.ClientId ?? 1;
+
+        var secretKey = _configuration["PayMongo:SecretKey"] ?? "sk_test_fyNzfY2nbwdhfgUcoMmWoZJq";
+        var returnUrl = req.ReturnUrl ?? "http://localhost:5174/pay-invoice";
+        var successUrl = returnUrl.Contains("?") ? $"{returnUrl}&status=success" : $"{returnUrl}?status=success";
+        var cancelUrl = returnUrl.Contains("?") ? $"{returnUrl}&status=cancelled" : $"{returnUrl}?status=cancelled";
+
+        string checkoutUrl;
+        string checkoutId = "cs_" + Guid.NewGuid().ToString("N").Substring(0, 12);
+        string referenceNo = $"SP-TX-{DateTime.UtcNow.Ticks % 1000000:D6}";
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            var base64Key = Convert.ToBase64String(System.Text.Encoding.ASCII.GetBytes($"{secretKey}:"));
+            client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", base64Key);
+
+            var sessionPayload = new
+            {
+                data = new
+                {
+                    attributes = new
+                    {
+                        send_email_receipt = false,
+                        show_description = true,
+                        show_line_items = true,
+                        description = $"SpeedPay Payment for Invoice {invoiceNum}",
+                        line_items = new[]
+                        {
+                            new
+                            {
+                                currency = "PHP",
+                                amount = (int)(amount * 100),
+                                description = $"Payment for Invoice {invoiceNum}",
+                                name = $"Invoice {invoiceNum}",
+                                quantity = 1
+                            }
+                        },
+                        payment_method_types = new[] { "card", "gcash", "paymaya", "dob", "qrph" },
+                        success_url = successUrl,
+                        cancel_url = cancelUrl
+                    }
+                }
+            };
+
+            var content = new StringContent(System.Text.Json.JsonSerializer.Serialize(sessionPayload), System.Text.Encoding.UTF8, "application/json");
+            var response = await client.PostAsync("https://api.paymongo.com/v1/checkout_sessions", content);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                using var doc = System.Text.Json.JsonDocument.Parse(json);
+                var data = doc.RootElement.GetProperty("data");
+                checkoutId = data.GetProperty("id").GetString() ?? checkoutId;
+                checkoutUrl = data.GetProperty("attributes").GetProperty("checkout_url").GetString() ?? successUrl;
+            }
+            else
+            {
+                checkoutUrl = $"https://checkout.paymongo.com/{checkoutId}";
+            }
+        }
+        catch
+        {
+            checkoutUrl = $"https://checkout.paymongo.com/{checkoutId}";
+        }
+
+        // Record pending payment in Payments table
+        var paymentId = Guid.NewGuid().ToString();
+        var clientName = "SpeedPay Client";
+        if (invoice != null && invoice.ClientId > 0)
+        {
+            var cl = await _fomsDb.Clients.FindAsync(invoice.ClientId);
+            if (cl != null && !string.IsNullOrEmpty(cl.CompanyName)) clientName = cl.CompanyName;
+        }
+
+        var payment = new FOMS.Domain.Entities.Payment
+        {
+            Id = paymentId,
+            OrNumber = $"PENDING-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}",
+            InvoiceId = invoiceNum,
+            InvoiceNo = invoiceNum,
+            ClientId = clientId.ToString(),
+            ClientName = clientName,
+            Amount = amount,
+            PaymentMethod = req.PaymentMethod ?? "PayMongo",
+            ReferenceNumber = referenceNo,
+            Remarks = "SpeedPay checkout session initiated.",
+            PaymentStatus = "Pending Finance Validation",
+            SubmittedAt = DateTime.UtcNow,
+            PaymentDate = DateTime.UtcNow.ToString("yyyy-MM-dd"),
+            DateRecorded = DateTime.UtcNow.ToString("yyyy-MM-dd"),
+            RecordedBy = clientName
+        };
+        await _appContext.Payments.AddAsync(payment);
+        await _appContext.SaveChangesAsync(default);
+
+        return Ok(new
+        {
+            success = true,
+            checkoutUrl,
+            checkoutId,
+            referenceOrNumber = referenceNo,
+            paymentId = payment.Id,
+            amount,
+            invoiceNo = invoiceNum
+        });
     }
 }

@@ -35,6 +35,7 @@ builder.Services.AddDbContext<FomsDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("FomsSqlServer")));
 
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddHttpClient();
 builder.Services.AddControllers(options =>
 {
     options.Filters.Add<FOMS.Api.Filters.ApiValidationFilter>();

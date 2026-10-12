@@ -154,18 +154,27 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({
         <div
           style={{
             background: '#FEF2F2',
-            border: '1px solid #FECACA',
-            borderRadius: 8,
-            padding: '10px 14px',
-            color: '#DC2626',
-            fontSize: '0.85rem',
+            border: '1px solid #F87171',
+            borderRadius: 10,
+            padding: '14px 18px',
+            color: '#991B1B',
+            fontSize: '0.875rem',
             display: 'flex',
-            alignItems: 'center',
-            gap: 8,
+            flexDirection: 'column',
+            gap: 6,
+            textAlign: 'left',
           }}
         >
-          <i className="ti ti-alert-circle" />
-          {error}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: '0.95rem' }}>
+            <i className="ti ti-alert-triangle" style={{ fontSize: '1.15rem', color: '#DC2626' }} />
+            Invalid Document Uploaded
+          </div>
+          <div style={{ color: '#B91C1C', lineHeight: 1.45 }}>
+            {error}
+          </div>
+          <div style={{ fontSize: '0.78rem', color: '#7F1D1D', marginTop: 2, fontWeight: 500 }}>
+            Only official receipts, invoices, billing statements, or payment-related finance documents are allowed.
+          </div>
         </div>
       )}
     </div>

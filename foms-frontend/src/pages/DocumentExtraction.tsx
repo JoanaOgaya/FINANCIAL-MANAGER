@@ -19,9 +19,15 @@ export const DocumentExtraction: React.FC = () => {
   const { toast } = useToast();
   const scope = getDuplicateScope(user?.role);
   const isAssistantFM = user?.role === 'ASSISTANT_FM';
-  const canUpload = canUploadDocuments(user?.role);
-
   const [docType, setDocType] = useState<DocumentType>(isAssistantFM ? 'liquidation' : 'invoice');
+
+  useEffect(() => {
+    if (isAssistantFM && docType !== 'liquidation') {
+      setDocType('liquidation');
+    }
+  }, [isAssistantFM]);
+
+  const canUpload = canUploadDocuments(user?.role, docType);
   const [activeExtraction, setActiveExtraction] = useState<DocumentExtractionResult | null>(null);
   const [isPolling, setIsPolling] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);

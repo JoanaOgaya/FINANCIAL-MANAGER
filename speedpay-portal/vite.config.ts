@@ -26,6 +26,17 @@ export default defineConfig(({ mode }) => {
                 if (!secretKey) throw new Error('VITE_PAYMONGO_SECRET_KEY not set in .env');
 
                 const base64Key = Buffer.from(`${secretKey}:`).toString('base64');
+                let parsedBody: any = {};
+                try {
+                  parsedBody = JSON.parse(body);
+                  if (parsedBody && parsedBody.data && parsedBody.data.attributes) {
+                    if (!parsedBody.data.attributes.payment_method_types) {
+                      parsedBody.data.attributes.payment_method_types = ['card', 'gcash', 'paymaya', 'dob', 'qrph'];
+                    }
+                  }
+                } catch {
+                  parsedBody = body;
+                }
 
                 const pmRes = await fetch('https://api.paymongo.com/v1/links', {
                   method: 'POST',
@@ -34,7 +45,7 @@ export default defineConfig(({ mode }) => {
                     'Content-Type': 'application/json',
                     'Authorization': `Basic ${base64Key}`,
                   },
-                  body,
+                  body: typeof parsedBody === 'string' ? parsedBody : JSON.stringify(parsedBody),
                 });
 
                 const data = await pmRes.json();

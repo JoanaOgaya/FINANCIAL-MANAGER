@@ -10,13 +10,16 @@ const baseURL: string = import.meta.env.VITE_API_URL ?? '/api';
 
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  data?: any;
+  constructor(message: string, status: number, data?: any) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.data = data;
   }
   get isForbidden() { return this.status === 403; }
   get isNetwork() { return this.status === 0; }
+  get isUnprocessable() { return this.status === 422; }
 }
 
 // ── Session token storage (auth only; no business data) ──────────────
@@ -58,7 +61,7 @@ instance.interceptors.response.use(
       err.response?.data?.message ??
       err.response?.data?.error ??
       (status === 0 ? 'Unable to reach the server. Check your connection.' : err.message);
-    return Promise.reject(new ApiError(message, status));
+    return Promise.reject(new ApiError(message, status, err.response?.data));
   },
 );
 

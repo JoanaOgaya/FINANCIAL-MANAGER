@@ -277,7 +277,7 @@ export function canViewCollectionPriority(role: Role | undefined | null): boolea
 export function canUploadDocuments(role: Role | undefined | null, docType?: string): boolean {
   if (!role) return false;
   if (role === ROLES.ACCOUNTANT) return true;
-  if (role === ROLES.ASSISTANT_FM) return isLiquidationDoc(docType);
+  if (role === ROLES.ASSISTANT_FM) return !docType || isLiquidationDoc(docType);
   return false;
 }
 

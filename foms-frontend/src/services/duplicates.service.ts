@@ -194,6 +194,19 @@ function mapTrail(h: any): ReviewTrailStep[] {
 }
 
 export const duplicatesService = {
+  /** Validate document type before duplicate scan (reject random/unrelated images) */
+  validate: async (formData: FormData) =>
+    http.post<{
+      success: boolean;
+      status: string;
+      isAllowed: boolean;
+      documentType?: string;
+      confidence?: number;
+      reason?: string;
+      message?: string;
+      shouldProceedToDuplicateScan?: boolean;
+    }>('/ai/documents/validate', formData),
+
   /** Upload/scan a document for duplicate checking */
   scan: async (formData: FormData, scope?: string) =>
     http.post<DuplicateScanResult>('/ai/duplicates/scan', formData, scope ? { params: { scope } } : undefined),
