@@ -23,7 +23,8 @@ export default function RecordSettlement() {
   // Filter records for current user / accountant view
   const myRecords = useMemo(() => {
     return settlements.filter((s: Settlement) => {
-      const matchUser = user?.fullName ? s.recordedBy.includes(user.fullName) || s.recordedBy.includes('Accountant') : true;
+      const isManager = ['FINANCIAL_MANAGER', 'HEAD_ACCOUNTANT', 'ADMIN'].includes(user?.role || '');
+      const matchUser = isManager || (user?.fullName ? (s.recordedBy || '').includes(user.fullName) || (s.recordedBy || '').includes('Accountant') : true);
       
       let matchDate = true;
       if (filterDateFrom || filterDateTo) {

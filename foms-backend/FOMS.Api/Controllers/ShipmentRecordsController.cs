@@ -39,11 +39,21 @@ public class ShipmentRecordsController : ApiControllerBase
                 {
                     new() { ClientId = 1, WaybillNumber = "WB-NCR-88491", Origin = "Manila Hub", Destination = "Quezon City", DeliveryArea = "NCR", ActualWeight = 12.5m, DeliveryStatus = "Delivered", PodStatus = "Validated", IsBilled = false, CreatedAt = DateTime.UtcNow.AddDays(-3), UpdatedAt = DateTime.UtcNow },
                     new() { ClientId = 1, WaybillNumber = "WB-NCR-88492", Origin = "Manila Hub", Destination = "Pampanga", DeliveryArea = "Luzon", ActualWeight = 8.0m, DeliveryStatus = "Delivered", PodStatus = "Validated", IsBilled = false, CreatedAt = DateTime.UtcNow.AddDays(-2), UpdatedAt = DateTime.UtcNow },
-                    new() { ClientId = 1, WaybillNumber = "WB-NCR-88493", Origin = "Cebu Hub", Destination = "Mandaue", DeliveryArea = "Visayas", ActualWeight = 15.2m, DeliveryStatus = "Delivered", PodStatus = "Validated", IsBilled = false, CreatedAt = DateTime.UtcNow.AddDays(-2), UpdatedAt = DateTime.UtcNow },
+                    new() { ClientId = 1, WaybillNumber = "WB-NCR-88493", Origin = "Cebu Hub", Destination = "Mandaue", DeliveryArea = "Visayas", ActualWeight = 15.2m, DeliveryStatus = "Delivered", PodStatus = "Pending", IsBilled = false, CreatedAt = DateTime.UtcNow.AddDays(-2), UpdatedAt = DateTime.UtcNow },
                     new() { ClientId = 2, WaybillNumber = "WB-NCR-88494", Origin = "Manila Hub", Destination = "Makati", DeliveryArea = "NCR", ActualWeight = 6.4m, DeliveryStatus = "Delivered", PodStatus = "Validated", IsBilled = false, CreatedAt = DateTime.UtcNow.AddDays(-1), UpdatedAt = DateTime.UtcNow },
-                    new() { ClientId = 2, WaybillNumber = "WB-NCR-88495", Origin = "Davao Hub", Destination = "Tagum", DeliveryArea = "Mindanao", ActualWeight = 22.0m, DeliveryStatus = "Delivered", PodStatus = "Validated", IsBilled = false, CreatedAt = DateTime.UtcNow.AddDays(-1), UpdatedAt = DateTime.UtcNow }
+                    new() { ClientId = 2, WaybillNumber = "WB-NCR-88495", Origin = "Davao Hub", Destination = "Tagum", DeliveryArea = "Mindanao", ActualWeight = 22.0m, DeliveryStatus = "Delivered", PodStatus = "Pending", IsBilled = false, CreatedAt = DateTime.UtcNow.AddDays(-1), UpdatedAt = DateTime.UtcNow }
                 };
                 _fomsDb.Waybills.AddRange(samples);
+                await _fomsDb.SaveChangesAsync();
+            }
+            else if (!await _fomsDb.Waybills.AnyAsync(w => w.PodStatus == "Pending"))
+            {
+                var pendingSamples = new List<Waybill>
+                {
+                    new() { ClientId = 1, WaybillNumber = "WB-NCR-88496", Origin = "Cebu Hub", Destination = "Mandaue", DeliveryArea = "Visayas", ActualWeight = 14.0m, DeliveryStatus = "Delivered", PodStatus = "Pending", IsBilled = false, CreatedAt = DateTime.UtcNow.AddDays(-2), UpdatedAt = DateTime.UtcNow },
+                    new() { ClientId = 2, WaybillNumber = "WB-NCR-88497", Origin = "Davao Hub", Destination = "Tagum", DeliveryArea = "Mindanao", ActualWeight = 19.5m, DeliveryStatus = "Delivered", PodStatus = "Pending", IsBilled = false, CreatedAt = DateTime.UtcNow.AddDays(-1), UpdatedAt = DateTime.UtcNow }
+                };
+                _fomsDb.Waybills.AddRange(pendingSamples);
                 await _fomsDb.SaveChangesAsync();
             }
         }
@@ -76,7 +86,7 @@ public class ShipmentRecordsController : ApiControllerBase
                 actualWeight = w.ActualWeight ?? 1m,
                 volumeWeight = 1m,
                 chargeableWeight = w.ActualWeight ?? 1m,
-                status = "Validated",
+                status = w.PodStatus ?? "Validated",
                 deliveryStatus = w.DeliveryStatus ?? "Delivered",
                 podStatus = w.PodStatus ?? "Validated",
                 hasOriginalPOD = true,

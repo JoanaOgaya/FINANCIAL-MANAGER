@@ -38,6 +38,7 @@ public class PaymentDto
     public string? Notes { get; set; }
     public string? Remarks { get; set; }
     public string? OrNumber { get; set; }
+    public string? Flow { get; set; }
 }
 
 [Route("payments")]
@@ -52,6 +53,34 @@ public class PaymentsController : ApiControllerBase
     {
         _context = context;
         _fomsDb = fomsDb;
+    }
+
+    private async Task EnsureSeededAsync()
+    {
+        try
+        {
+            if (!await _context.Payments.AnyAsync(p => p.Flow == "outflow"))
+            {
+                var outflowPayment = new Payment
+                {
+                    Id = "PAY-002",
+                    InvoiceId = "INV-002",
+                    InvoiceNo = "BI-2026-0001",
+                    ClientId = "CA-001",
+                    ClientName = "Lazada Philippines",
+                    Amount = 15000m,
+                    Flow = "outflow",
+                    PaymentMethod = "Bank Transfer",
+                    ReferenceNumber = "DISB-2026-0042",
+                    PaymentStatus = "Validated",
+                    RecordedBy = "Crystalyn Joyce C. Fajardo",
+                    SubmittedAt = DateTime.UtcNow.AddDays(-1)
+                };
+                _context.Payments.Add(outflowPayment);
+                await _context.SaveChangesAsync(default);
+            }
+        }
+        catch { }
     }
 
     private static object MapPayment(Payment p)
@@ -72,6 +101,7 @@ public class PaymentsController : ApiControllerBase
             clientId = p.ClientId,
             clientName = p.ClientName,
             amount = p.Amount,
+            flow = !string.IsNullOrEmpty(p.Flow) ? p.Flow : "inflow",
             paymentMethod = p.PaymentMethod,
             referenceNumber = p.ReferenceNumber,
             bankConfirmed = isConfirmed,
@@ -94,6 +124,7 @@ public class PaymentsController : ApiControllerBase
     [HttpGet]
     public async Task<IActionResult> GetPayments()
     {
+        await EnsureSeededAsync();
         var payments = await _context.Payments
             .OrderByDescending(p => p.SubmittedAt)
             .ToListAsync();
@@ -132,6 +163,7 @@ public class PaymentsController : ApiControllerBase
             ClientName = clientName,
             PaymentDate = dto.PaymentDate ?? dto.DateRecorded ?? DateTime.UtcNow.ToString("yyyy-MM-dd"),
             Amount = dto.Amount ?? 0m,
+            Flow = dto.Flow ?? "inflow",
             PaymentMethod = dto.PaymentMethod ?? "Bank Transfer",
             ReferenceNumber = dto.ReferenceNumber ?? Guid.NewGuid().ToString("N")[..8].ToUpper(),
             ProofImageUrl = dto.ProofOfPaymentUrl ?? dto.ProofImageUrl,

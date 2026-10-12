@@ -48,33 +48,58 @@ public class AiDuplicatesController : ApiControllerBase
                     new()
                     {
                         DocumentNumber = "SPEEDPAY-TX-9901",
-                        FinalDecision = "Duplicate",
-                        Reviewer = "Financial Manager",
-                        DecisionReason = "Potential duplicate receipt hash matching previously validated transaction TX-9844.",
+                        FinalDecision = "Confirmed Duplicate",
+                        Reviewer = "Crystalyn Joyce C. Fajardo",
+                        DecisionReason = "Confirmed duplicate transaction hash matching verified record TX-9844.",
+                        ReviewedDate = DateTime.UtcNow.AddHours(-4),
+                        CreatedAt = DateTime.UtcNow.AddHours(-4)
+                    },
+                    new()
+                    {
+                        DocumentNumber = "OR-2026-0099",
+                        FinalDecision = "Dismissed",
+                        Reviewer = "Crystalyn Joyce C. Fajardo",
+                        DecisionReason = "Dismissed flagged alert: Verified separate branch delivery receipt.",
                         ReviewedDate = DateTime.UtcNow.AddHours(-6),
                         CreatedAt = DateTime.UtcNow.AddHours(-6)
                     },
                     new()
                     {
                         DocumentNumber = "WB-NCR-88491",
-                        FinalDecision = "Verified Unique",
-                        Reviewer = "Operations",
-                        DecisionReason = "Extracted 12 waybill fields with 99.4% confidence. Proof of delivery signature verified.",
+                        FinalDecision = "Resolved",
+                        Reviewer = "Crystalyn Joyce C. Fajardo",
+                        DecisionReason = "Resolved OCR mismatch: Courier signature and CTC validated.",
                         ReviewedDate = DateTime.UtcNow.AddDays(-1),
                         CreatedAt = DateTime.UtcNow.AddDays(-1)
-                    },
-                    new()
-                    {
-                        DocumentNumber = "OR-2026-0089",
-                        FinalDecision = "Flagged",
-                        Reviewer = "System AI",
-                        DecisionReason = "Amount discrepancy between receipt OCR (₱4,500) and claimed reimbursement.",
-                        ReviewedDate = DateTime.UtcNow.AddDays(-2),
-                        CreatedAt = DateTime.UtcNow.AddDays(-2)
                     }
                 };
                 _fomsDb.AIReviewHistories.AddRange(samples);
                 await _fomsDb.SaveChangesAsync();
+            }
+            else
+            {
+                var neededDecisions = new[] { "Confirmed Duplicate", "Dismissed", "Resolved" };
+                var toAdd = new List<AIReviewHistory>();
+                foreach (var dec in neededDecisions)
+                {
+                    if (!await _fomsDb.AIReviewHistories.AnyAsync(h => h.FinalDecision == dec))
+                    {
+                        toAdd.Add(new AIReviewHistory
+                        {
+                            DocumentNumber = dec == "Confirmed Duplicate" ? "SPEEDPAY-TX-9901" : dec == "Dismissed" ? "OR-2026-0099" : "WB-NCR-88491",
+                            FinalDecision = dec,
+                            Reviewer = "Crystalyn Joyce C. Fajardo",
+                            DecisionReason = $"Review completed with decision: {dec}.",
+                            ReviewedDate = DateTime.UtcNow.AddHours(-3),
+                            CreatedAt = DateTime.UtcNow.AddHours(-3)
+                        });
+                    }
+                }
+                if (toAdd.Any())
+                {
+                    _fomsDb.AIReviewHistories.AddRange(toAdd);
+                    await _fomsDb.SaveChangesAsync();
+                }
             }
         }
         catch { }
@@ -283,12 +308,43 @@ public class AiDuplicatesController : ApiControllerBase
     }
 
     [HttpGet("review-history")]
-    public async Task<IActionResult> GetReviewHistory([FromQuery] string? scope, [FromQuery] string? decision, [FromQuery] int page = 1, [FromQuery] int pageSize = 10)
+    public async Task<IActionResult> GetReviewHistory(
+        [FromQuery] string? scope,
+        [FromQuery] string? decision,
+        [FromQuery] string? status,
+        [FromQuery] string? filter,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 10)
     {
         await EnsureSeededAsync();
-        var history = await _fomsDb.AIReviewHistories
+        var query = _fomsDb.AIReviewHistories.AsNoTracking().AsQueryable();
+
+        var selectedDecision = !string.IsNullOrWhiteSpace(decision) ? decision :
+                               !string.IsNullOrWhiteSpace(status) ? status : filter;
+
+        if (!string.IsNullOrWhiteSpace(selectedDecision) && !selectedDecision.Equals("All", StringComparison.OrdinalIgnoreCase))
+        {
+            var dTerm = selectedDecision.Trim();
+            if (dTerm.Contains("Duplicate", StringComparison.OrdinalIgnoreCase))
+            {
+                query = query.Where(h => h.FinalDecision != null && (h.FinalDecision.Contains("Duplicate") || h.FinalDecision.Contains("Flagged")));
+            }
+            else if (dTerm.Contains("Dismiss", StringComparison.OrdinalIgnoreCase))
+            {
+                query = query.Where(h => h.FinalDecision != null && (h.FinalDecision.Contains("Dismiss") || h.FinalDecision.Contains("Unique")));
+            }
+            else if (dTerm.Contains("Resolve", StringComparison.OrdinalIgnoreCase))
+            {
+                query = query.Where(h => h.FinalDecision != null && (h.FinalDecision.Contains("Resolve") || h.FinalDecision.Contains("Verified")));
+            }
+            else
+            {
+                query = query.Where(h => h.FinalDecision != null && h.FinalDecision.Contains(dTerm));
+            }
+        }
+
+        var history = await query
             .OrderByDescending(h => h.ReviewedDate ?? h.CreatedAt)
-            .AsNoTracking()
             .ToListAsync();
 
         var total = history.Count;

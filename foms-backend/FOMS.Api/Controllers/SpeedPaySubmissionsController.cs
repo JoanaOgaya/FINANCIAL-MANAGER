@@ -72,10 +72,10 @@ public class SpeedPaySubmissionsController : ControllerBase
                         InvoiceNumber = "SHP-2026-0001",
                         ClientId = "CA-002",
                         ClientName = "Shopee Philippines",
-                        PaymentMethod = "BDO Online",
-                        ReferenceNumber = "BDO-992014",
+                        PaymentMethod = "Maya",
+                        ReferenceNumber = "MAYA-992014",
                         AmountPaid = 42500m,
-                        ProofFileName = "bdo_transfer_992014.pdf",
+                        ProofFileName = "maya_transfer_992014.pdf",
                         ProofFileUrl = "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=600&auto=format&fit=crop&q=80",
                         Status = "Validated",
                         SubmittedAt = DateTime.UtcNow.AddDays(-1)
@@ -83,6 +83,20 @@ public class SpeedPaySubmissionsController : ControllerBase
                 };
                 _context.SpeedPayManualSubmissions.AddRange(samples);
                 await _context.SaveChangesAsync(default);
+            }
+            else
+            {
+                var nonSupported = await _context.SpeedPayManualSubmissions
+                    .Where(s => s.PaymentMethod != "GCash" && s.PaymentMethod != "Maya")
+                    .ToListAsync();
+                if (nonSupported.Any())
+                {
+                    foreach (var s in nonSupported)
+                    {
+                        s.PaymentMethod = "Maya";
+                    }
+                    await _context.SaveChangesAsync(default);
+                }
             }
         }
         catch { }

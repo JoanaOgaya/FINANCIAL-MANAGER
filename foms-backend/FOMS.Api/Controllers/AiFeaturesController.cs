@@ -17,17 +17,7 @@ public class AiFeaturesController : ApiControllerBase
         return Ok(Array.Empty<object>());
     }
 
-    [HttpGet("collection/priorities")]
-    public IActionResult GetCollectionPriorities([FromQuery] int page = 1, [FromQuery] int pageSize = 10)
-    {
-        return Ok(new
-        {
-            items = Array.Empty<object>(),
-            total = 0,
-            page,
-            pageSize
-        });
-    }
+    // Collection priorities handled by AiCollectionController to include database/seeded priorities
 
     [HttpGet("collection/suggestions")]
     public IActionResult GetCollectionSuggestions([FromQuery] string? clientId)

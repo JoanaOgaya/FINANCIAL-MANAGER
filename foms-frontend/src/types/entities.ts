@@ -158,6 +158,7 @@ export interface Payment {
   clientId: string;
   clientName?: string;
   amount: number;
+  flow: 'outflow' | 'inflow';
   paymentMethod: 'Check' | 'Cash' | 'Bank Transfer' | 'Online Bank Transfer' | 'GCash' | 'Maya';
   referenceNumber: string;
   bankConfirmed: boolean;

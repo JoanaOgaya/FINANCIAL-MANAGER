@@ -67,11 +67,37 @@ public class InvoicesController : ApiControllerBase
 
     private static object MapToFrontend(Invoice i)
     {
-        var status = i.PaymentStatus == "Paid" ? "Approved" :
-                     !string.IsNullOrEmpty(i.PaymentValidationStatus) ? 
-                        (i.PaymentValidationStatus.Contains("Pending") || i.PaymentValidationStatus.Contains("Review") ? "Pending Approval" : 
-                         i.PaymentValidationStatus.Contains("Correction") ? "Needs Revision" : "Approved") :
-                     "Pending Approval";
+        string status;
+        var pStatusVal = i.PaymentStatus ?? string.Empty;
+        var pvStatusVal = i.PaymentValidationStatus ?? string.Empty;
+
+        if (pStatusVal.Equals("Draft", StringComparison.OrdinalIgnoreCase) || pvStatusVal.Equals("Draft", StringComparison.OrdinalIgnoreCase))
+        {
+            status = "Draft";
+        }
+        else if (pStatusVal.Contains("Revision", StringComparison.OrdinalIgnoreCase) || pvStatusVal.Contains("Revision", StringComparison.OrdinalIgnoreCase) ||
+                 pStatusVal.Contains("Correction", StringComparison.OrdinalIgnoreCase) || pvStatusVal.Contains("Correction", StringComparison.OrdinalIgnoreCase))
+        {
+            status = "Needs Revision";
+        }
+        else if (pStatusVal.Equals("Pending Approval", StringComparison.OrdinalIgnoreCase) || pvStatusVal.Equals("Pending Approval", StringComparison.OrdinalIgnoreCase) ||
+                 pStatusVal.Contains("Pending", StringComparison.OrdinalIgnoreCase) || pvStatusVal.Contains("Pending", StringComparison.OrdinalIgnoreCase) ||
+                 pStatusVal.Contains("Review", StringComparison.OrdinalIgnoreCase) || pvStatusVal.Contains("Review", StringComparison.OrdinalIgnoreCase))
+        {
+            status = "Pending Approval";
+        }
+        else if (pStatusVal.Equals("Paid", StringComparison.OrdinalIgnoreCase) || pStatusVal.Equals("Approved", StringComparison.OrdinalIgnoreCase) || pvStatusVal.Equals("Approved", StringComparison.OrdinalIgnoreCase))
+        {
+            status = "Approved";
+        }
+        else if (!string.IsNullOrEmpty(pvStatusVal))
+        {
+            status = pvStatusVal;
+        }
+        else
+        {
+            status = "Draft";
+        }
 
         var isDueSoon = DateTime.TryParse(i.DueDate, out var dt) && (dt - DateTime.UtcNow).TotalDays <= 7 && (dt - DateTime.UtcNow).TotalDays >= 0;
         var pStatus = i.Balance <= 0 ? "Paid" :
@@ -137,10 +163,94 @@ public class InvoicesController : ApiControllerBase
         return Ok(MapToFrontend(invoice));
     }
 
+    private async Task EnsureSeededAsync()
+    {
+        try
+        {
+            bool modified = false;
+            if (!await _context.Invoices.AnyAsync(i => i.PaymentStatus == "Draft" || i.PaymentValidationStatus == "Draft"))
+            {
+                _context.Invoices.Add(new FOMS.Domain.Entities.Invoice
+                {
+                    Id = "INV-001",
+                    InvoiceNo = "LZD-2026-0001",
+                    ClientId = "CA-001",
+                    ClientName = "Lazada Philippines",
+                    BillingDate = DateTime.UtcNow.AddDays(-10).ToString("yyyy-MM-dd"),
+                    DueDate = DateTime.UtcNow.AddDays(20).ToString("yyyy-MM-dd"),
+                    FreightCharges = 44642.86m,
+                    Subtotal = 44642.86m,
+                    VatAmount = 5357.14m,
+                    TotalAmount = 50000m,
+                    AmountPaid = 0m,
+                    Balance = 50000m,
+                    PaymentStatus = "Draft",
+                    PaymentValidationStatus = "Draft",
+                    DateEncoded = DateTime.UtcNow.AddDays(-10).ToString("yyyy-MM-dd")
+                });
+                modified = true;
+            }
+
+            if (!await _context.Invoices.AnyAsync(i => i.PaymentStatus == "Pending Approval" || i.PaymentValidationStatus == "Pending Approval"))
+            {
+                _context.Invoices.Add(new FOMS.Domain.Entities.Invoice
+                {
+                    Id = "INV-002",
+                    InvoiceNo = "BI-2026-0001",
+                    ClientId = "CA-001",
+                    ClientName = "Lazada Philippines",
+                    BillingDate = DateTime.UtcNow.AddDays(-5).ToString("yyyy-MM-dd"),
+                    DueDate = DateTime.UtcNow.AddDays(25).ToString("yyyy-MM-dd"),
+                    FreightCharges = 26785.71m,
+                    Subtotal = 26785.71m,
+                    VatAmount = 3214.29m,
+                    TotalAmount = 30000m,
+                    AmountPaid = 0m,
+                    Balance = 30000m,
+                    PaymentStatus = "Pending Approval",
+                    PaymentValidationStatus = "Pending Approval",
+                    DateEncoded = DateTime.UtcNow.AddDays(-5).ToString("yyyy-MM-dd")
+                });
+                modified = true;
+            }
+
+            if (!await _context.Invoices.AnyAsync(i => i.PaymentStatus == "Needs Revision" || i.PaymentValidationStatus == "Needs Revision"))
+            {
+                _context.Invoices.Add(new FOMS.Domain.Entities.Invoice
+                {
+                    Id = "INV-003",
+                    InvoiceNo = "SHP-2026-0001",
+                    ClientId = "CA-002",
+                    ClientName = "Shopee Philippines",
+                    BillingDate = DateTime.UtcNow.AddDays(-3).ToString("yyyy-MM-dd"),
+                    DueDate = DateTime.UtcNow.AddDays(14).ToString("yyyy-MM-dd"),
+                    FreightCharges = 37946.43m,
+                    Subtotal = 37946.43m,
+                    VatAmount = 4553.57m,
+                    TotalAmount = 42500m,
+                    AmountPaid = 0m,
+                    Balance = 42500m,
+                    PaymentStatus = "Needs Revision",
+                    PaymentValidationStatus = "Needs Revision",
+                    Description = "Returned for tax computation revision",
+                    DateEncoded = DateTime.UtcNow.AddDays(-3).ToString("yyyy-MM-dd")
+                });
+                modified = true;
+            }
+
+            if (modified)
+            {
+                await _context.SaveChangesAsync(default);
+            }
+        }
+        catch { }
+    }
+
     [Authorize]
     [HttpGet]
     public async Task<IActionResult> GetInvoices()
     {
+        await EnsureSeededAsync();
         var invoices = await _context.Invoices.ToListAsync();
 
         foreach (var invoice in invoices)

@@ -48,9 +48,25 @@ public class LiquidationsController : ControllerBase
                 {
                     new() { ReferenceNumber = "LIQ-2026-0001", SubmittedByName = "Juan Dela Cruz", TotalAmount = 4500m, LeftoverCash = 500m, ReimbursementAmount = 0m, Status = "Pending Validation", DateSubmitted = DateTime.UtcNow.AddDays(-1), CreatedAt = DateTime.UtcNow.AddDays(-1) },
                     new() { ReferenceNumber = "LIQ-2026-0002", SubmittedByName = "Pedro Santos", TotalAmount = 3200m, LeftoverCash = 0m, ReimbursementAmount = 200m, Status = "Pending Validation", DateSubmitted = DateTime.UtcNow.AddDays(-2), CreatedAt = DateTime.UtcNow.AddDays(-2) },
-                    new() { ReferenceNumber = "LIQ-2026-0003", SubmittedByName = "Carlos Reyes", TotalAmount = 6100m, LeftoverCash = 900m, ReimbursementAmount = 0m, Status = "Validated", DateSubmitted = DateTime.UtcNow.AddDays(-4), CreatedAt = DateTime.UtcNow.AddDays(-4) }
+                    new() { ReferenceNumber = "LIQ-2026-0003", SubmittedByName = "Carlos Reyes", TotalAmount = 6100m, LeftoverCash = 900m, ReimbursementAmount = 0m, Status = "Validated", DateSubmitted = DateTime.UtcNow.AddDays(-4), CreatedAt = DateTime.UtcNow.AddDays(-4) },
+                    new() { ReferenceNumber = "LIQ-2026-0004", SubmittedByName = "Miguel Gomez", TotalAmount = 1850m, LeftoverCash = 0m, ReimbursementAmount = 150m, Status = "Returned", DateSubmitted = DateTime.UtcNow.AddDays(-5), CreatedAt = DateTime.UtcNow.AddDays(-5) }
                 };
                 _fomsDb.Liquidations.AddRange(samples);
+                await _fomsDb.SaveChangesAsync();
+            }
+            else if (!await _fomsDb.Liquidations.AnyAsync(l => l.Status == "Returned"))
+            {
+                _fomsDb.Liquidations.Add(new Liquidation
+                {
+                    ReferenceNumber = "LIQ-2026-0004",
+                    SubmittedByName = "Miguel Gomez",
+                    TotalAmount = 1850m,
+                    LeftoverCash = 0m,
+                    ReimbursementAmount = 150m,
+                    Status = "Returned",
+                    DateSubmitted = DateTime.UtcNow.AddDays(-5),
+                    CreatedAt = DateTime.UtcNow.AddDays(-5)
+                });
                 await _fomsDb.SaveChangesAsync();
             }
         }

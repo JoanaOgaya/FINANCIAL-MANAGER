@@ -34,7 +34,7 @@ const EMPTY: Filters = { search: '', filter: '', dateFrom: '', dateTo: '' };
 
 function useDuplicateList<T>(
   fetcher: (q: DuplicateQuery) => Promise<Paged<T>>,
-  filterParam: 'status' | 'documentType',
+  filterParam: 'status' | 'documentType' | 'decision',
   options: { pageSize?: number; lockedFilter?: string; initialStatus?: string } = {},
 ) {
   const { user } = useAuth();
@@ -122,7 +122,11 @@ function useDuplicateList<T>(
       setPage(1);
     },
     decisionFilter: draft.filter,
-    setDecisionFilter: setField('filter'),
+    setDecisionFilter: (value: string) => {
+      setDraft((d) => ({ ...d, filter: value }));
+      setApplied((a) => ({ ...a, filter: value }));
+      setPage(1);
+    },
     dateFrom: draft.dateFrom,
     setDateFrom: setField('dateFrom'),
     dateTo: draft.dateTo,
@@ -155,5 +159,5 @@ export function useUniqueDocuments(options: { pageSize?: number } = {}) {
 }
 
 export function useReviewHistory(options: { pageSize?: number } = {}) {
-  return useDuplicateList<ReviewHistoryItem>(duplicatesService.reviewHistory, 'status', options);
+  return useDuplicateList<ReviewHistoryItem>(duplicatesService.reviewHistory, 'decision', options);
 }

@@ -217,9 +217,6 @@ export const SpeedPayValidation: React.FC = () => {
   const methodFilterOptions = [
     { label: 'GCash', value: 'GCash' },
     { label: 'Maya', value: 'Maya' },
-    { label: 'BDO Online', value: 'BDO Online' },
-    { label: 'BPI Online', value: 'BPI Online' },
-    { label: 'Bank Transfer', value: 'Bank Transfer' },
   ];
 
   const statusFilterOptions = [

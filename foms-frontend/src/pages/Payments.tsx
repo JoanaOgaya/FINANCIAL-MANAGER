@@ -121,7 +121,26 @@ const PaymentsContent: React.FC = () => {
   const [expenses, setExpenses] = useState<Array<{
     id: string; description: string; amount: number; category: string;
     date: string; referenceNo: string; recordedBy: string;
-  }>>([]);
+  }>>([
+    {
+      id: 'EXP-001',
+      description: 'Fleet Fuel & Vehicle Maintenance',
+      amount: 4500,
+      category: 'Transportation',
+      date: new Date().toISOString().split('T')[0],
+      referenceNo: 'EXP-2026-FUEL',
+      recordedBy: 'Finance Team',
+    },
+    {
+      id: 'EXP-002',
+      description: 'Courier Daily Travel Allowances',
+      amount: 3200,
+      category: 'Operations',
+      date: new Date().toISOString().split('T')[0],
+      referenceNo: 'EXP-2026-ALLOW',
+      recordedBy: 'Finance Team',
+    },
+  ]);
   const [expenseForm, setExpenseForm] = useState({
     description: '', amount: '', category: 'Office Supplies', date: '', referenceNo: '',
   });
@@ -637,15 +656,28 @@ const PaymentsContent: React.FC = () => {
               rowKey="id"
               searchPlaceholder="Search payments..."
               searchFields={['invoiceNumber', 'referenceNumber', 'status'] as any}
-              filters={[{
-                key: 'status', label: 'All Statuses', options: [
-                  { label: 'Pending Validation', value: 'Pending Validation' },
-                  { label: 'Validated', value: 'Validated' },
-                  { label: 'Approved', value: 'Approved' },
-                  { label: 'Rejected', value: 'Rejected' }
-                ],
-                filterFn: (row: any, val: string) => row.status === val
-              }]}
+              filters={[
+                {
+                  key: 'flow',
+                  label: 'Flow Direction',
+                  options: [
+                    { label: 'Inflow', value: 'inflow' },
+                    { label: 'Outflow', value: 'outflow' }
+                  ],
+                  filterFn: (row: any, val: string) => (row.flow || 'inflow') === val
+                },
+                {
+                  key: 'status',
+                  label: 'All Statuses',
+                  options: [
+                    { label: 'Pending Validation', value: 'Pending Validation' },
+                    { label: 'Validated', value: 'Validated' },
+                    { label: 'Approved', value: 'Approved' },
+                    { label: 'Rejected', value: 'Rejected' }
+                  ],
+                  filterFn: (row: any, val: string) => row.status === val
+                }
+              ]}
               emptyMessage="No payment records found for this client."
               columnToggle={true} densityToggle={true} exportable={false}
               createButtons={isAccountant ? [{
@@ -994,14 +1026,33 @@ const PaymentsContent: React.FC = () => {
     classification: exp.description,
   }));
 
-  const allCashFlowRows = [...cashFlowRows, ...speedPayRows, ...expenseRows]
+  const dbOutflowRows = (cashFlowRecords || [])
+    .filter(c => c.type === 'Outflow')
+    .map(c => ({
+      id: c.id,
+      clientId: '',
+      clientName: 'Operating Disbursement',
+      invoiceId: '',
+      invoiceNumber: c.sourceReference || '—',
+      amount: c.amount,
+      paymentMethod: 'Bank Transfer',
+      referenceNumber: c.sourceReference || '—',
+      recordedAt: c.date ? (c.date.includes('T') ? c.date : `${c.date}T00:00:00Z`) : new Date().toISOString(),
+      status: 'Validated' as const,
+      type: 'Outflow' as const,
+      classification: c.sourceReference || 'Disbursement',
+    }));
+
+  const allCashFlowRows = [...cashFlowRows, ...speedPayRows, ...expenseRows, ...dbOutflowRows]
     .sort((a, b) => new Date(b.recordedAt).getTime() - new Date(a.recordedAt).getTime());
 
   const totalInflow = allCashFlowRows
     .filter(r => r.type === 'Inflow')
     .reduce((sum: number, r) => sum + r.amount, 0);
 
-  const totalOutflow = expenses.reduce((sum: number, e) => sum + e.amount, 0);
+  const totalOutflow = allCashFlowRows
+    .filter(r => r.type === 'Outflow')
+    .reduce((sum: number, e) => sum + e.amount, 0);
   const netCashFlow = totalInflow - totalOutflow;
 
   const pendingInflowAmt = pendingPayments.reduce((s: number, p: Payment) => s + p.amount, 0);

@@ -67,6 +67,25 @@ public class AiCollectionController : ApiControllerBase
                     priority_level = "Medium Priority",
                     due_date = DateTime.UtcNow.AddDays(20).ToString("yyyy-MM-dd")
                 }
+            },
+            new
+            {
+                id = "REC-003",
+                review_status = "Accepted Recommendation",
+                reviewed_at = DateTime.UtcNow.AddHours(-12).ToString("o"),
+                reviewed_by = "Accountant User",
+                reviewer_role = "Accountant",
+                remarks = "Low risk client with consistent weekly payment record.",
+                recommended_action = "Routine courtesy notification sent.",
+                priority = new
+                {
+                    normalized_invoice_number = "SHP-2026-0001",
+                    invoice_number = "SHP-2026-0001",
+                    client_name = "Shopee Philippines",
+                    outstanding_balance = 12500.00m,
+                    priority_level = "Low Priority",
+                    due_date = DateTime.UtcNow.AddDays(30).ToString("yyyy-MM-dd")
+                }
             }
         };
 
@@ -125,6 +144,26 @@ public class AiCollectionController : ApiControllerBase
                 overdue_days = 5,
                 suggestedAction = "Follow up via email regarding overdue billing.",
                 suggested_action = "Follow up via email regarding overdue billing."
+            },
+            new
+            {
+                id = "PRIO-003",
+                invoiceNumber = "SHP-2026-0001",
+                invoice_number = "SHP-2026-0001",
+                clientName = "Shopee Philippines",
+                client_name = "Shopee Philippines",
+                outstandingBalance = 12500.00m,
+                outstanding_balance = 12500.00m,
+                dueDate = DateTime.UtcNow.AddDays(30).ToString("yyyy-MM-dd"),
+                due_date = DateTime.UtcNow.AddDays(30).ToString("yyyy-MM-dd"),
+                priorityLevel = "Low Priority",
+                priority_level = "Low Priority",
+                priorityScore = 25,
+                priority_score = 25,
+                daysOverdue = 0,
+                overdue_days = 0,
+                suggestedAction = "Routine payment tracking scheduled for standard billing cycle.",
+                suggested_action = "Routine payment tracking scheduled for standard billing cycle."
             }
         };
 

@@ -178,9 +178,38 @@ public class ClientsController : ApiControllerBase
         });
     }
 
+    private async Task EnsureSeededAsync()
+    {
+        try
+        {
+            if (!await _context.Clients.AnyAsync(c => c.Status == "Inactive"))
+            {
+                var inactiveClient = new FOMS.Domain.Entities.Client
+                {
+                    Id = "CA-004",
+                    ClientCode = "CA-004",
+                    Name = "Zalora Philippines",
+                    BusinessName = "Zalora PH",
+                    ContactPerson = "Robert Tan",
+                    ContactNumber = "09185551234",
+                    Email = "finance@zalora.com.ph",
+                    Address = "Muntinlupa City, Metro Manila",
+                    Tin = "321-654-987",
+                    CreditLimit = 250000m,
+                    CurrentBalance = 0m,
+                    Status = "Inactive"
+                };
+                _context.Clients.Add(inactiveClient);
+                await _context.SaveChangesAsync(default);
+            }
+        }
+        catch { }
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetClients()
     {
+        await EnsureSeededAsync();
         var clients = await Mediator.Send(new ClientFeatures.GetClientsQuery());
         var result = clients.Select(c =>
         {
@@ -207,7 +236,7 @@ public class ClientsController : ApiControllerBase
                 status = c.Status ?? "Active",
                 vatStatus = "VATable",
                 vatRate = 0.12m,
-                billingSchedule = (code == "CA-002" || c.Name.Contains("Shopee")) ? "Monthly" : "Semi-monthly",
+                billingSchedule = (code == "CA-002" || c.Name.Contains("Shopee") || code == "CA-003" || c.Name.Contains("TikTok")) ? "Weekly" : "Monthly",
                 createdAt = c.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ss"),
                 dateRegistered = c.DateRegistered,
                 lastTransaction = c.LastTransaction,
@@ -249,7 +278,7 @@ public class ClientsController : ApiControllerBase
             status = c.Status ?? "Active",
             vatStatus = "VATable",
             vatRate = 0.12m,
-            billingSchedule = (code == "CA-002" || c.Name.Contains("Shopee")) ? "Monthly" : "Semi-monthly",
+            billingSchedule = (code == "CA-002" || c.Name.Contains("Shopee") || code == "CA-003" || c.Name.Contains("TikTok")) ? "Weekly" : "Monthly",
             createdAt = c.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ss"),
             dateRegistered = c.DateRegistered,
             lastTransaction = c.LastTransaction,

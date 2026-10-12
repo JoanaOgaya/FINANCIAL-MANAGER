@@ -115,7 +115,38 @@ public static class ApplicationDbContextSeed
                 Address = "Cebu, Philippines",
                 Tin = "987-654-321",
                 CreditLimit = 300000m,
-                CurrentBalance = 0m
+                CurrentBalance = 0m,
+                Status = "Active"
+            },
+            new Client
+            {
+                Id = "CA-003",
+                ClientCode = "CA-003",
+                Name = "TikTok Shop Philippines",
+                BusinessName = "TikTok Shop PH",
+                ContactPerson = "David Lee",
+                ContactNumber = "09173334444",
+                Email = "billing@tiktok.com",
+                Address = "Taguig, Philippines",
+                Tin = "456-789-123",
+                CreditLimit = 400000m,
+                CurrentBalance = 15000m,
+                Status = "Active"
+            },
+            new Client
+            {
+                Id = "CA-004",
+                ClientCode = "CA-004",
+                Name = "Zalora Philippines",
+                BusinessName = "Zalora PH",
+                ContactPerson = "Robert Tan",
+                ContactNumber = "09185551234",
+                Email = "finance@zalora.com.ph",
+                Address = "Muntinlupa City, Metro Manila",
+                Tin = "321-654-987",
+                CreditLimit = 250000m,
+                CurrentBalance = 0m,
+                Status = "Inactive"
             }
         };
         foreach (var client in demoClients)
@@ -132,14 +163,24 @@ public static class ApplicationDbContextSeed
                 existing.Tin = client.Tin;
                 existing.CreditLimit = client.CreditLimit;
                 existing.CurrentBalance = client.CurrentBalance;
+                existing.Status = client.Status;
             }
             else
             {
                 context.Clients.Add(client);
             }
         }
+        try
+        {
+            await context.Database.ExecuteSqlRawAsync(
+                "UPDATE Clients SET client_id = 1, client_code = 'CA-001', company_name = 'Lazada Philippines' WHERE Id = 'CA-001' AND (client_id IS NULL OR company_name IS NULL);" +
+                "UPDATE Clients SET client_id = 2, client_code = 'CA-002', company_name = 'Shopee Philippines' WHERE Id = 'CA-002' AND (client_id IS NULL OR company_name IS NULL);" +
+                "UPDATE Clients SET client_id = 3, client_code = 'CA-003', company_name = 'TikTok Shop Philippines' WHERE Id = 'CA-003' AND (client_id IS NULL OR company_name IS NULL);" +
+                "UPDATE Clients SET client_id = 4, client_code = 'CA-004', company_name = 'Zalora Philippines' WHERE Id = 'CA-004' AND (client_id IS NULL OR company_name IS NULL);"
+            );
+        }
+        catch { }
 
-        // ==================== Invoices ====================
         var demoInvoices = new List<Invoice>
         {
             new Invoice
@@ -153,7 +194,8 @@ public static class ApplicationDbContextSeed
                 TotalAmount = 50000m,
                 AmountPaid = 0m,
                 Balance = 50000m,
-                PaymentStatus = "Unpaid"
+                PaymentStatus = "Draft",
+                PaymentValidationStatus = "Draft"
             },
             new Invoice
             {
@@ -166,7 +208,23 @@ public static class ApplicationDbContextSeed
                 TotalAmount = 30000m,
                 AmountPaid = 0m,
                 Balance = 30000m,
-                PaymentStatus = "Unpaid"
+                PaymentStatus = "Pending Approval",
+                PaymentValidationStatus = "Pending Approval"
+            },
+            new Invoice
+            {
+                Id = "INV-003",
+                InvoiceNo = "SHP-2026-0001",
+                ClientId = "CA-002",
+                ClientName = "Shopee Philippines",
+                BillingDate = DateTime.UtcNow.AddDays(-3).ToString("yyyy-MM-dd"),
+                DueDate = DateTime.UtcNow.AddDays(14).ToString("yyyy-MM-dd"),
+                TotalAmount = 42500m,
+                AmountPaid = 0m,
+                Balance = 42500m,
+                PaymentStatus = "Needs Revision",
+                PaymentValidationStatus = "Needs Revision",
+                Description = "Returned for tax computation revision"
             }
         };
         foreach (var invoice in demoInvoices)
@@ -183,6 +241,8 @@ public static class ApplicationDbContextSeed
                 existing.AmountPaid = invoice.AmountPaid;
                 existing.Balance = invoice.Balance;
                 existing.PaymentStatus = invoice.PaymentStatus;
+                existing.PaymentValidationStatus = invoice.PaymentValidationStatus;
+                existing.Description = invoice.Description;
             }
             else
             {
@@ -260,16 +320,39 @@ public static class ApplicationDbContextSeed
                 ClientId = "CA-001",
                 ClientName = "Lazada Philippines",
                 Amount = 50000m,
+                Flow = "inflow",
                 PaymentMethod = "Bank Transfer",
                 ReferenceNumber = "OR-2026-TEST",
                 PaymentStatus = "Pending Finance Validation",
                 SubmittedAt = DateTime.UtcNow
+            },
+            new Payment
+            {
+                Id = "PAY-002",
+                InvoiceId = "INV-002",
+                InvoiceNo = "BI-2026-0001",
+                ClientId = "CA-001",
+                ClientName = "Lazada Philippines",
+                Amount = 15000m,
+                Flow = "outflow",
+                PaymentMethod = "Bank Transfer",
+                ReferenceNumber = "DISB-2026-0042",
+                PaymentStatus = "Validated",
+                RecordedBy = "Crystalyn Joyce C. Fajardo",
+                SubmittedAt = DateTime.UtcNow.AddDays(-1)
             }
         };
         foreach (var p in demoPayments)
         {
             var existing = await context.Payments.FirstOrDefaultAsync(pay => pay.Id == p.Id);
-            if (existing == null)
+            if (existing != null)
+            {
+                existing.Flow = p.Flow;
+                existing.Amount = p.Amount;
+                existing.PaymentStatus = p.PaymentStatus;
+                existing.RecordedBy = p.RecordedBy;
+            }
+            else
             {
                 context.Payments.Add(p);
             }

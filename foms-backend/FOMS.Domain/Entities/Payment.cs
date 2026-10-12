@@ -12,6 +12,7 @@ public class Payment
     public string ClientName { get; set; } = string.Empty;
     public string PaymentDate { get; set; } = string.Empty;
     public decimal Amount { get; set; }
+    public string Flow { get; set; } = "inflow"; // "inflow" or "outflow"
     public string PaymentMethod { get; set; } = "Bank Transfer"; // "Check" | "Bank Transfer" | "GCash" | "Maya"
     public string ReferenceNumber { get; set; } = string.Empty;
     public string? ProofImageUrl { get; set; }

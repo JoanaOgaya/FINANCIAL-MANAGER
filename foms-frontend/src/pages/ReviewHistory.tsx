@@ -133,6 +133,20 @@ const ReviewHistory: React.FC = () => {
     if (key === 'dateFrom') setDateFrom(value);
   };
 
+  const decisionTabs = ['All', 'Confirmed Duplicate', 'Dismissed', 'Resolved'] as const;
+
+  const displayedItems = React.useMemo(() => {
+    if (!decisionFilter || decisionFilter === 'All') return items;
+    const term = decisionFilter.toLowerCase();
+    return items.filter((r) => {
+      const d = (r.finalDecision || '').toLowerCase();
+      if (term.includes('duplicate')) return d.includes('duplicate') || d.includes('flagged');
+      if (term.includes('dismiss')) return d.includes('dismiss') || d.includes('unique');
+      if (term.includes('resolve')) return d.includes('resolve') || d.includes('verified');
+      return d.includes(term);
+    });
+  }, [items, decisionFilter]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
@@ -166,22 +180,77 @@ const ReviewHistory: React.FC = () => {
         </div>
       )}
 
+      {/* Decision Filter Tabs */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#475569', marginRight: 4 }}>DECISION:</span>
+        {decisionTabs.map((tab) => {
+          const isActive = (decisionFilter === tab) || (!decisionFilter && tab === 'All');
+          const colorMap: Record<string, { bg: string; color: string; border: string }> = {
+            'All': { bg: '#F1F5F9', color: '#0F172A', border: '#CBD5E1' },
+            'Confirmed Duplicate': { bg: '#FEF2F2', color: '#991B1B', border: '#FECACA' },
+            'Dismissed': { bg: '#F0FDF4', color: '#166534', border: '#BBF7D0' },
+            'Resolved': { bg: '#EFF6FF', color: '#1E40AF', border: '#BFDBFE' },
+          };
+          const style = colorMap[tab] || colorMap['All'];
+          return (
+            <button
+              key={tab}
+              onClick={() => setDecisionFilter(tab === 'All' ? '' : tab)}
+              style={{
+                padding: '6px 16px',
+                borderRadius: '20px',
+                fontSize: '0.78rem',
+                fontWeight: isActive ? 800 : 600,
+                cursor: 'pointer',
+                border: `2px solid ${isActive ? style.color : style.border}`,
+                background: isActive ? style.bg : '#fff',
+                color: isActive ? style.color : '#64748B',
+                transition: 'all 0.2s ease',
+                boxShadow: isActive ? `0 0 0 2px ${style.bg}` : 'none',
+              }}
+            >
+              {tab}
+              {tab !== 'All' && (
+                <span style={{ marginLeft: 6, fontSize: '0.7rem', opacity: 0.7 }}>
+                  ({items.filter((r) => {
+                    const d = (r.finalDecision || '').toLowerCase();
+                    const t = tab.toLowerCase();
+                    if (t.includes('duplicate')) return d.includes('duplicate') || d.includes('flagged');
+                    if (t.includes('dismiss')) return d.includes('dismiss') || d.includes('unique');
+                    if (t.includes('resolve')) return d.includes('resolve') || d.includes('verified');
+                    return false;
+                  }).length})
+                </span>
+              )}
+              {tab === 'All' && (
+                <span style={{ marginLeft: 6, fontSize: '0.7rem', opacity: 0.7 }}>({items.length})</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Search & Date Filter */}
       <FilterBar
         searchValue={search}
         onSearchChange={setSearch}
         searchPlaceholder="Search by ID, document #, reviewer…"
-        fields={filterFields}
-        values={filterValues}
+        fields={[{
+          key: 'dateFrom',
+          label: 'REVIEWED DATE',
+          type: 'date' as const,
+        }]}
+        values={{ dateFrom }}
         onFieldChange={handleFieldChange}
         onApply={applyFilters}
         onReset={resetFilters}
       />
 
       <DataTable
-        rows={items}
+        rows={displayedItems}
         columns={columns}
         rowKey={(r) => r.id}
-        total={total}
+        total={displayedItems.length}
         page={page}
         pageSize={pageSize}
         onPageChange={setPage}

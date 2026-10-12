@@ -112,6 +112,7 @@ export interface DuplicateScanResult {
 export interface DuplicateQuery extends ListQuery {
   scope?: string;
   documentType?: string;
+  decision?: string;
 }
 
 export interface DecidePayload {
