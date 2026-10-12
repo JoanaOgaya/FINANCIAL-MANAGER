@@ -182,6 +182,45 @@ export const Login: React.FC = () => {
           <p className="login-card-subtitle">Enter your Email and password below.</p>
           <div className="login-card-divider" />
 
+          {/* Quick Demo Credentials Box */}
+          <div style={{
+            background: '#F0FDFA',
+            border: '1px solid #99F6E4',
+            borderRadius: '8px',
+            padding: '10px 12px',
+            marginBottom: '16px',
+            fontSize: '12px',
+            color: '#0F766E',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '8px'
+          }}>
+            <div>
+              <strong>Demo Client:</strong> <code>TEST-001</code> / <code>Password@123</code>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setClientId('TEST-001');
+                setPassword('Password@123');
+                setFieldErrors({});
+              }}
+              style={{
+                background: '#0D9488',
+                color: '#FFFFFF',
+                border: 'none',
+                borderRadius: '6px',
+                padding: '4px 10px',
+                fontSize: '11px',
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+            >
+              Auto-fill
+            </button>
+          </div>
+
           {/* Form */}
           <form className="login-form" onSubmit={handleLoginSubmit} noValidate>
 
