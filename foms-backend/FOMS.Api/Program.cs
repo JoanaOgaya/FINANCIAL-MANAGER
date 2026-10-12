@@ -253,6 +253,7 @@ app.UseCors("FomsPolicy");
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+app.MapGet("/", () => Results.Redirect("/swagger"));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // START WEB SERVER FIRST (so Render health checks pass while migrations run)

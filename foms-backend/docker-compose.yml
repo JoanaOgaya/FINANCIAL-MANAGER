@@ -9,7 +9,8 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ASPNETCORE_URLS=http://+:8080
-      - ConnectionStrings__DefaultConnection=Server=host.docker.internal\\SQLEXPRESS;Database=FOMSDB;Trusted_Connection=True;TrustServerCertificate=True;
+      - ConnectionStrings__FomsSqlServer=Server=host.docker.internal\\SQLEXPRESS;Database=FOMS_DB;Trusted_Connection=True;TrustServerCertificate=True;
+      - ConnectionStrings__DefaultConnection=Server=host.docker.internal\\SQLEXPRESS;Database=FOMS_DB;Trusted_Connection=True;TrustServerCertificate=True;
       - JwtSettings__Secret=${JWT_SECRET:-FOMS_Capstone_JWT_SecureKey_2026!!}
       - JwtSettings__Issuer=FOMS.Api
       - JwtSettings__Audience=FOMS.Api
