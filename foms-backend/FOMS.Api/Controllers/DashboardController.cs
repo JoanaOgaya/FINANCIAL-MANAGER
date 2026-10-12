@@ -1,4 +1,4 @@
-﻿using System.Threading.Tasks;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using FOMS.Application.Interfaces;
@@ -7,6 +7,7 @@ namespace FOMS.Api.Controllers;
 
 [Authorize]
 [Route("api/dashboard")]
+[Route("dashboard")]
 [ApiController]
 public class DashboardController : ControllerBase
 {

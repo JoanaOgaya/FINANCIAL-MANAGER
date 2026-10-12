@@ -1,4 +1,4 @@
-﻿using System.Threading.Tasks;
+using System.Threading.Tasks;
 using System.Linq;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -7,10 +7,12 @@ using FOMS.Application.Interfaces;
 
 namespace FOMS.Api.Controllers;
 
-[Route("api/client-accounts")]
-[Route("api/v1/client-accounts")]
 [Route("api/clients")]
 [Route("api/v1/clients")]
+[Route("clients")]
+[Route("client-accounts")]
+[Route("api/client-accounts")]
+[Route("api/v1/client-accounts")]
 public class ClientsController : ApiControllerBase
 {
     private readonly IApplicationDbContext _context;
@@ -180,7 +182,79 @@ public class ClientsController : ApiControllerBase
     public async Task<IActionResult> GetClients()
     {
         var clients = await Mediator.Send(new ClientFeatures.GetClientsQuery());
-        return Ok(clients);
+        var result = clients.Select(c =>
+        {
+            var code = !string.IsNullOrEmpty(c.ClientCode) ? c.ClientCode : c.Id;
+            return new
+            {
+                id = code,
+                clientCode = code,
+                clientId = c.Id,
+                name = c.Name,
+                businessName = c.BusinessName,
+                contactPerson = c.ContactPerson,
+                contactNumber = c.ContactNumber,
+                phone = c.ContactNumber,
+                email = c.Email,
+                address = c.Address,
+                tin = c.Tin,
+                region = "Metro Manila",
+                serviceArea = "NCR",
+                creditLimit = c.CreditLimit,
+                currentBalance = c.CurrentBalance,
+                totalBilled = c.TotalBilled,
+                totalPaid = c.TotalPaid,
+                status = c.Status ?? "Active",
+                vatStatus = "VATable",
+                vatRate = 0.12m,
+                billingSchedule = (code == "CA-002" || c.Name.Contains("Shopee")) ? "Monthly" : "Semi-monthly",
+                createdAt = c.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ss"),
+                dateRegistered = c.DateRegistered,
+                lastTransaction = c.LastTransaction,
+                archived = c.Archived
+            };
+        }).ToList();
+        return Ok(result);
+    }
+
+    [HttpGet("{id}")]
+    public async Task<IActionResult> GetClientById(string id)
+    {
+        var c = await _context.Clients
+            .Include(cl => cl.Invoices)
+            .FirstOrDefaultAsync(cl => cl.Id == id || cl.ClientCode == id);
+
+        if (c == null) return NotFound(new { message = $"Client {id} not found" });
+
+        var code = !string.IsNullOrEmpty(c.ClientCode) ? c.ClientCode : c.Id;
+        return Ok(new
+        {
+            id = code,
+            clientCode = code,
+            clientId = c.Id,
+            name = c.Name,
+            businessName = c.BusinessName,
+            contactPerson = c.ContactPerson,
+            contactNumber = c.ContactNumber,
+            phone = c.ContactNumber,
+            email = c.Email,
+            address = c.Address,
+            tin = c.Tin,
+            region = "Metro Manila",
+            serviceArea = "NCR",
+            creditLimit = c.CreditLimit,
+            currentBalance = c.CurrentBalance,
+            totalBilled = c.TotalBilled,
+            totalPaid = c.TotalPaid,
+            status = c.Status ?? "Active",
+            vatStatus = "VATable",
+            vatRate = 0.12m,
+            billingSchedule = (code == "CA-002" || c.Name.Contains("Shopee")) ? "Monthly" : "Semi-monthly",
+            createdAt = c.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ss"),
+            dateRegistered = c.DateRegistered,
+            lastTransaction = c.LastTransaction,
+            archived = c.Archived
+        });
     }
 
     [HttpPost]

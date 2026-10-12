@@ -213,11 +213,11 @@ public class AnalyticsService : IAnalyticsService
                     var pays = payments.Where(p => p.InvoiceId == inv.Id || p.InvoiceNo == inv.InvoiceNo).ToList();
                     if (pays.Any())
                     {
-                        var lastPayDate = pays.Max(p => DateTime.Parse(p.PaymentDate));
-                        var due = DateTime.Parse(inv.DueDate);
+                        var lastPayDate = pays.Select(p => DateTime.TryParse(p.PaymentDate, out var dt) ? dt : DateTime.MinValue).DefaultIfEmpty(DateTime.MinValue).Max();
+                        var due = DateTime.TryParse(inv.DueDate, out var dtDue) ? dtDue : DateTime.MaxValue;
                         if (lastPayDate > due) delayPaymentsCount++;
                     }
-                    else if (inv.PaymentStatus == "Overdue" || DateTime.Parse(inv.DueDate) < DateTime.UtcNow)
+                    else if (inv.PaymentStatus == "Overdue" || (DateTime.TryParse(inv.DueDate, out var dtDue) && dtDue < DateTime.UtcNow))
                     {
                         delayPaymentsCount++;
                     }

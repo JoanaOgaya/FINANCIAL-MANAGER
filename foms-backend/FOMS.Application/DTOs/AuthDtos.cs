@@ -13,11 +13,18 @@ public class AuthResultDto
 
 public class LoginRequestDto
 {
-    [Required(ErrorMessage = "Username is required.")]
-    public string Username { get; set; } = string.Empty;
-
-    [Required(ErrorMessage = "Password is required.")]
+    public string? Username { get; set; }
+    public string? EmployeeNumber { get; set; }
+    public string? EmployeeId { get; set; }
     public string Password { get; set; } = string.Empty;
+
+    public string GetIdentifier()
+    {
+        if (!string.IsNullOrWhiteSpace(EmployeeNumber)) return EmployeeNumber.Trim();
+        if (!string.IsNullOrWhiteSpace(Username)) return Username.Trim();
+        if (!string.IsNullOrWhiteSpace(EmployeeId)) return EmployeeId.Trim();
+        return string.Empty;
+    }
 }
 
 public class RefreshRequestDto

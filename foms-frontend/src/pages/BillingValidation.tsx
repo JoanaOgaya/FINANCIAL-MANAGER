@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/ToastContext';
 import { useQuery } from '../hooks/useQuery';
@@ -21,6 +21,7 @@ export const BillingValidation: React.FC = () => {
   const { data: waybillsData, refetch: refetchWaybills } = useQuery('billing:waybills', () => waybillsService.list({ pageSize: 100 }));
   const { data: ratesData } = useQuery('billing:rates', () => ratesService.list({ pageSize: 100 }));
   const { data: clientsData } = useQuery('billing:clients', () => clientsService.list({ pageSize: 100 }));
+  const { data: recordsData, refetch: refetchRecords } = useQuery('billing:records', () => ratesService.records.list({ pageSize: 100 }));
 
   const waybills: Waybill[] = waybillsData?.items || [];
   const billingRates: BillingRate[] = ratesData?.items || [];
@@ -28,6 +29,12 @@ export const BillingValidation: React.FC = () => {
 
   const [billingRecords, setBillingRecords] = useState<BillingRecord[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (recordsData?.items) {
+      setBillingRecords(recordsData.items);
+    }
+  }, [recordsData?.items]);
 
   const isHead = user?.role === 'HEAD_ACCOUNTANT' || user?.role === 'FINANCIAL_MANAGER';
 

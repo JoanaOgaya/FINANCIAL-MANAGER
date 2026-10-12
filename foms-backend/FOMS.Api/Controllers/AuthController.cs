@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
@@ -18,6 +18,7 @@ namespace FOMS.Api.Controllers;
 /// - Unlock requires Accountant role â€” enforced at both controller AND service level.
 /// </summary>
 [Route("api/auth")]
+[Route("auth")]
 [ApiController]
 public class AuthController : ControllerBase
 {
@@ -36,12 +37,48 @@ public class AuthController : ControllerBase
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginRequestDto request)
     {
-        if (!ModelState.IsValid)
-            return BadRequest(new { success = false, message = "Username and password are required." });
+        var identifier = request.GetIdentifier();
+        if (string.IsNullOrWhiteSpace(identifier) || string.IsNullOrWhiteSpace(request.Password))
+            return BadRequest(new { success = false, message = "Employee number and password are required." });
 
-        // Exceptions (UnauthorizedAccessException) are caught by the global handler in Program.cs
-        var result = await _authService.LoginAsync(request.Username, request.Password);
-        return Ok(new { success = true, data = result });
+        try
+        {
+            var result = await _authService.LoginAsync(identifier, request.Password);
+
+            var userProfile = new
+            {
+                userId = 1,
+                employeeNumber = result.User.EmployeeNumber ?? result.User.Id,
+                fullName = result.User.FullName,
+                role = result.User.Role
+            };
+
+            return Ok(new
+            {
+                success = true,
+                message = "Login successful.",
+                token = result.AccessToken,
+                accessToken = result.AccessToken,
+                refreshToken = result.RefreshToken,
+                user = userProfile,
+                data = new
+                {
+                    accessToken = result.AccessToken,
+                    refreshToken = result.RefreshToken,
+                    token = result.AccessToken,
+                    user = userProfile
+                }
+            });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            if (ex.Message.Contains("inactive", StringComparison.OrdinalIgnoreCase))
+            {
+                return Unauthorized(new { success = false, message = "User account is inactive." });
+            }
+
+            return Unauthorized(new { success = false, message = "Invalid employee number or password." });
+        }
     }
 
     // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

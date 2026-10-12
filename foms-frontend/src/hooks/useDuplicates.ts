@@ -116,7 +116,11 @@ function useDuplicateList<T>(
     statusFilter: draft.filter,
     setStatusFilter: setField('filter'),
     docTypeFilter: draft.filter,
-    setDocTypeFilter: setField('filter'),
+    setDocTypeFilter: (value: string) => {
+      setDraft((d) => ({ ...d, filter: value }));
+      setApplied((a) => ({ ...a, filter: value }));
+      setPage(1);
+    },
     decisionFilter: draft.filter,
     setDecisionFilter: setField('filter'),
     dateFrom: draft.dateFrom,

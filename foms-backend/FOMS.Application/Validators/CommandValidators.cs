@@ -8,22 +8,26 @@ using FOMS.Application.Interfaces;
 using FOMS.Application.Features;
 using FOMS.Domain.Entities;
 
-namespace FOMS.Application.Validators;
+using OfficialReceipt = FOMS.Domain.Entities.OfficialReceipt;
 
-public static class ValidationHelpers
+namespace FOMS.Application.Validators
 {
-    public static bool NotContainHtml(string? val)
+    public static class ValidationHelpers
     {
-        if (string.IsNullOrEmpty(val)) return true;
-        return !val.Contains("<script") && !val.Contains("javascript:") && !val.Contains("<html");
+        public static bool NotContainHtml(string? val)
+        {
+            if (string.IsNullOrEmpty(val)) return true;
+            return !val.Contains("<script") && !val.Contains("javascript:") && !val.Contains("<html");
+        }
+
+        public static bool BeAValidDate(string? dateStr)
+        {
+            if (string.IsNullOrEmpty(dateStr)) return false;
+            return DateTime.TryParse(dateStr, out _);
+        }
     }
 
-    public static bool BeAValidDate(string? dateStr)
-    {
-        if (string.IsNullOrEmpty(dateStr)) return false;
-        return DateTime.TryParse(dateStr, out _);
-    }
-}
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TASK 2 — PAYMENT VALIDATION
@@ -547,4 +551,8 @@ public class VerifyValidationCommandValidator : AbstractValidator<ValidationFeat
             .Must(status => AllowedStatuses.Contains(status))
             .WithMessage("Invalid verification status. Allowed statuses: Pending, Approved, Rejected.");
     }
+}
+
+
+
 }

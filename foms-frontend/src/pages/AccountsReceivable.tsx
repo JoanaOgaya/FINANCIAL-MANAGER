@@ -147,6 +147,8 @@ const ManagerView = ({ token, user, arRecords }: any) => {
         const role = r.reviewer_role || 'Accountant';
         return {
           id: String(r.id),
+          status: 'VERIFIED',
+          createdBy: r.reviewed_by || r.reviewer_username || 'ACCOUNTANT',
           timestamp: r.reviewed_at ? new Date(r.reviewed_at).toLocaleString() : 'N/A',
           invoiceNumber: r.priority?.normalized_invoice_number || r.priority?.invoice_number || 'N/A',
           clientName: r.priority?.client_name || 'N/A',
@@ -243,7 +245,9 @@ const ManagerView = ({ token, user, arRecords }: any) => {
                 const isApproved = String(row.decision).toLowerCase().includes('accept') || String(row.decision).toLowerCase().includes('process');
                 const decisionColor = isRejected ? '#DC2626' : isApproved ? '#059669' : '#7C3AED';
                 const decisionBg = isRejected ? '#FEF2F2' : isApproved ? '#F0FDF4' : '#EDE9FE';
-                const actCheck = canActOnRecord(user, row, 'resolve');
+                const actCheck = (user?.role === 'FINANCIAL_MANAGER' || user?.role === 'Financial Manager')
+                  ? { allowed: true }
+                  : canActOnRecord(user, { ...row, status: row.status || 'VERIFIED' }, 'resolve');
 
                 return (
                   <div
@@ -329,7 +333,7 @@ const ManagerView = ({ token, user, arRecords }: any) => {
                         onMouseEnter={e => { if (actCheck.allowed) e.currentTarget.style.opacity = '0.9'; }}
                         onMouseLeave={e => { if (actCheck.allowed) e.currentTarget.style.opacity = '1'; }}
                       >
-                        {!actCheck.allowed ? (actCheck.reason || 'Restricted') : 'View & Decide'}
+                        {!actCheck.allowed ? (actCheck.reason || 'Restricted') : 'Final Resolve'}
                       </button>
                     </div>
                   </div>

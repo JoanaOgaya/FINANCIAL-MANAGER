@@ -3,7 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using FOMS.Application.Interfaces;
-using FOMS.Domain.Entities;
+using FOMS.Domain.Entities.SqlServer;
 using FOMS.Infrastructure.Persistence;
 
 namespace FOMS.Infrastructure.Repositories;

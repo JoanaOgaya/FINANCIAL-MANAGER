@@ -1,9 +1,11 @@
-﻿using System.Threading.Tasks;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using FOMS.Application.Features;
 
 namespace FOMS.Api.Controllers;
 
+[Route("api/tickets")]
+[Route("tickets")]
 public class TicketsController : ApiControllerBase
 {
     [HttpGet]

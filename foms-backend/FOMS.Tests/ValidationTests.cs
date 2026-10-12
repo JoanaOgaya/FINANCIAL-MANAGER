@@ -169,7 +169,7 @@ public class ValidationTests
         Assert.True(result.IsValid, string.Join(", ", result.Errors.Select(e => e.ErrorMessage)));
 
         // 2. Duplicate Client Code
-        var duplicateCode = validCommand with { ClientCode = "LZD-001" };
+        var duplicateCode = validCommand with { ClientCode = "CA-001" };
         var codeRes = await validator.ValidateAsync(duplicateCode);
         Assert.False(codeRes.IsValid);
         Assert.Contains(codeRes.Errors, e => e.PropertyName == "ClientCode");

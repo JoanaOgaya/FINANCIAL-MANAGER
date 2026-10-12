@@ -418,3 +418,555 @@ public class AuditLog
     [Column("created_at")]
     public DateTime? created_at { get; set; }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NEW ENTITIES — Financial Manager backend integration
+// ═══════════════════════════════════════════════════════════════════════════
+
+[Table("Waybills")]
+public class Waybill
+{
+    [Key]
+    [Column("waybill_id")]
+    public int WaybillId { get; set; }
+
+    [Column("waybill_number")]
+    public string WaybillNumber { get; set; } = string.Empty;
+
+    [Column("client_id")]
+    public int ClientId { get; set; }
+
+    [Column("origin")]
+    public string? Origin { get; set; }
+
+    [Column("destination")]
+    public string? Destination { get; set; }
+
+    [Column("delivery_area")]
+    public string? DeliveryArea { get; set; }
+
+    [Column("actual_weight")]
+    public decimal? ActualWeight { get; set; }
+
+    [Column("length_cm")]
+    public decimal? LengthCm { get; set; }
+
+    [Column("width_cm")]
+    public decimal? WidthCm { get; set; }
+
+    [Column("height_cm")]
+    public decimal? HeightCm { get; set; }
+
+    [Column("number_of_boxes")]
+    public int? NumberOfBoxes { get; set; }
+
+    [Column("declared_value")]
+    public decimal? DeclaredValue { get; set; }
+
+    [Column("delivery_status")]
+    public string? DeliveryStatus { get; set; }
+
+    [Column("pod_status")]
+    public string? PodStatus { get; set; }
+
+    [Column("is_billed")]
+    public bool IsBilled { get; set; } = false;
+
+    [Column("invoice_id")]
+    public int? InvoiceId { get; set; }
+
+    [Column("created_at")]
+    public DateTime? CreatedAt { get; set; }
+
+    [Column("updated_at")]
+    public DateTime? UpdatedAt { get; set; }
+}
+
+[Table("BillingDocuments")]
+public class BillingDocument
+{
+    [Key]
+    [Column("billing_doc_id")]
+    public int BillingDocId { get; set; }
+
+    [Column("waybill_id")]
+    public int WaybillId { get; set; }
+
+    [Column("client_id")]
+    public int ClientId { get; set; }
+
+    [Column("computed_amount")]
+    public decimal ComputedAmount { get; set; }
+
+    [Column("validation_status")]
+    public string? ValidationStatus { get; set; }
+
+    [Column("ctc_status")]
+    public string? CtcStatus { get; set; }
+
+    [Column("validated_by")]
+    public int? ValidatedBy { get; set; }
+
+    [Column("validated_at")]
+    public DateTime? ValidatedAt { get; set; }
+
+    [Column("created_at")]
+    public DateTime? CreatedAt { get; set; }
+}
+
+[Table("InvoiceLineItems")]
+public class InvoiceLineItem
+{
+    [Key]
+    [Column("line_item_id")]
+    public int LineItemId { get; set; }
+
+    [Column("invoice_id")]
+    public int InvoiceId { get; set; }
+
+    [Column("waybill_id")]
+    public int? WaybillId { get; set; }
+
+    [Column("description")]
+    public string? Description { get; set; }
+
+    [Column("quantity")]
+    public int Quantity { get; set; } = 1;
+
+    [Column("unit_price")]
+    public decimal UnitPrice { get; set; }
+
+    [Column("line_total")]
+    public decimal LineTotal { get; set; }
+
+    [Column("created_at")]
+    public DateTime? CreatedAt { get; set; }
+}
+
+[Table("InvoiceComputations")]
+public class InvoiceComputation
+{
+    [Key]
+    [Column("computation_id")]
+    public int ComputationId { get; set; }
+
+    [Column("invoice_id")]
+    public int InvoiceId { get; set; }
+
+    [Column("subtotal")]
+    public decimal Subtotal { get; set; }
+
+    [Column("vat_amount")]
+    public decimal VatAmount { get; set; }
+
+    [Column("discount_amount")]
+    public decimal DiscountAmount { get; set; }
+
+    [Column("total_amount")]
+    public decimal TotalAmount { get; set; }
+
+    [Column("computed_by")]
+    public int? ComputedBy { get; set; }
+
+    [Column("computed_at")]
+    public DateTime? ComputedAt { get; set; }
+}
+
+[Table("FomsOfficialReceipts")]
+public class FomsOfficialReceipt
+{
+    [Key]
+    [Column("or_id")]
+    public int OrId { get; set; }
+
+    [Column("invoice_id")]
+    public int? InvoiceId { get; set; }
+
+    [Column("payment_id")]
+    public int? PaymentId { get; set; }
+
+    [Column("client_id")]
+    public int? ClientId { get; set; }
+
+    [Column("or_number")]
+    public string OrNumber { get; set; } = string.Empty;
+
+    [Column("issued_amount")]
+    public decimal IssuedAmount { get; set; }
+
+    [Column("issued_by")]
+    public string? IssuedBy { get; set; }
+
+    [Column("issued_at")]
+    public DateTime? IssuedAt { get; set; }
+
+    [Column("pdf_path")]
+    public string? PdfPath { get; set; }
+
+    [Column("status")]
+    public string? Status { get; set; }
+}
+
+[Table("CashInflows")]
+public class CashInflow
+{
+    [Key]
+    [Column("inflow_id")]
+    public int InflowId { get; set; }
+
+    [Column("payment_id")]
+    public int? PaymentId { get; set; }
+
+    [Column("client_id")]
+    public int? ClientId { get; set; }
+
+    [Column("amount")]
+    public decimal Amount { get; set; }
+
+    [Column("source")]
+    public string? Source { get; set; }
+
+    [Column("reference_number")]
+    public string? ReferenceNumber { get; set; }
+
+    [Column("status")]
+    public string? Status { get; set; }
+
+    [Column("transaction_date")]
+    public DateTime? TransactionDate { get; set; }
+
+    [Column("created_at")]
+    public DateTime? CreatedAt { get; set; }
+}
+
+[Table("CashOutflows")]
+public class CashOutflow
+{
+    [Key]
+    [Column("outflow_id")]
+    public int OutflowId { get; set; }
+
+    [Column("category")]
+    public string? Category { get; set; }
+
+    [Column("description")]
+    public string? Description { get; set; }
+
+    [Column("amount")]
+    public decimal Amount { get; set; }
+
+    [Column("approved_by")]
+    public int? ApprovedBy { get; set; }
+
+    [Column("status")]
+    public string? Status { get; set; }
+
+    [Column("transaction_date")]
+    public DateTime? TransactionDate { get; set; }
+
+    [Column("created_at")]
+    public DateTime? CreatedAt { get; set; }
+}
+
+[Table("CashAdvances")]
+public class CashAdvance
+{
+    [Key]
+    [Column("cash_advance_id")]
+    public int CashAdvanceId { get; set; }
+
+    [Column("employee_id")]
+    public int? EmployeeId { get; set; }
+
+    [Column("amount")]
+    public decimal Amount { get; set; }
+
+    [Column("purpose")]
+    public string? Purpose { get; set; }
+
+    [Column("status")]
+    public string? Status { get; set; }
+
+    [Column("approved_by")]
+    public int? ApprovedBy { get; set; }
+
+    [Column("created_at")]
+    public DateTime? CreatedAt { get; set; }
+}
+
+[Table("Liquidations")]
+public class Liquidation
+{
+    [Key]
+    [Column("liquidation_id")]
+    public int LiquidationId { get; set; }
+
+    [Column("reference_number")]
+    public string? ReferenceNumber { get; set; }
+
+    [Column("cash_advance_id")]
+    public int? CashAdvanceId { get; set; }
+
+    [Column("submitted_by")]
+    public int? SubmittedBy { get; set; }
+
+    [Column("submitted_by_name")]
+    public string? SubmittedByName { get; set; }
+
+    [Column("total_amount")]
+    public decimal TotalAmount { get; set; }
+
+    [Column("leftover_cash")]
+    public decimal? LeftoverCash { get; set; }
+
+    [Column("reimbursement_amount")]
+    public decimal? ReimbursementAmount { get; set; }
+
+    [Column("status")]
+    public string? Status { get; set; }
+
+    [Column("validated_by")]
+    public int? ValidatedBy { get; set; }
+
+    [Column("validated_at")]
+    public DateTime? ValidatedAt { get; set; }
+
+    [Column("date_submitted")]
+    public DateTime? DateSubmitted { get; set; }
+
+    [Column("created_at")]
+    public DateTime? CreatedAt { get; set; }
+}
+
+[Table("LiquidationLineItems")]
+public class LiquidationLineItem
+{
+    [Key]
+    [Column("line_item_id")]
+    public int LineItemId { get; set; }
+
+    [Column("liquidation_id")]
+    public int LiquidationId { get; set; }
+
+    [Column("description")]
+    public string? Description { get; set; }
+
+    [Column("amount")]
+    public decimal Amount { get; set; }
+
+    [Column("receipt_attached")]
+    public bool ReceiptAttached { get; set; } = false;
+
+    [Column("created_at")]
+    public DateTime? CreatedAt { get; set; }
+}
+
+[Table("LiquidationDocuments")]
+public class LiquidationDocument
+{
+    [Key]
+    [Column("document_id")]
+    public int DocumentId { get; set; }
+
+    [Column("liquidation_id")]
+    public int LiquidationId { get; set; }
+
+    [Column("document_type")]
+    public string? DocumentType { get; set; }
+
+    [Column("file_path")]
+    public string? FilePath { get; set; }
+
+    [Column("uploaded_at")]
+    public DateTime? UploadedAt { get; set; }
+}
+
+[Table("FinancialAdjustments")]
+public class FinancialAdjustment
+{
+    [Key]
+    [Column("adjustment_id")]
+    public int AdjustmentId { get; set; }
+
+    [Column("invoice_id")]
+    public int? InvoiceId { get; set; }
+
+    [Column("client_id")]
+    public int? ClientId { get; set; }
+
+    [Column("adjustment_type")]
+    public string? AdjustmentType { get; set; }
+
+    [Column("amount")]
+    public decimal Amount { get; set; }
+
+    [Column("reason")]
+    public string? Reason { get; set; }
+
+    [Column("requested_by")]
+    public int? RequestedBy { get; set; }
+
+    [Column("status")]
+    public string? Status { get; set; }
+
+    [Column("approved_by")]
+    public int? ApprovedBy { get; set; }
+
+    [Column("approved_at")]
+    public DateTime? ApprovedAt { get; set; }
+
+    [Column("created_at")]
+    public DateTime? CreatedAt { get; set; }
+}
+
+[Table("CreditMemos")]
+public class CreditMemo
+{
+    [Key]
+    [Column("credit_memo_id")]
+    public int CreditMemoId { get; set; }
+
+    [Column("invoice_id")]
+    public int? InvoiceId { get; set; }
+
+    [Column("client_id")]
+    public int? ClientId { get; set; }
+
+    [Column("amount")]
+    public decimal Amount { get; set; }
+
+    [Column("reason")]
+    public string? Reason { get; set; }
+
+    [Column("status")]
+    public string? Status { get; set; }
+
+    [Column("approved_by")]
+    public int? ApprovedBy { get; set; }
+
+    [Column("approved_at")]
+    public DateTime? ApprovedAt { get; set; }
+
+    [Column("created_at")]
+    public DateTime? CreatedAt { get; set; }
+}
+
+[Table("RefundRequests")]
+public class RefundRequest
+{
+    [Key]
+    [Column("refund_id")]
+    public int RefundId { get; set; }
+
+    [Column("payment_id")]
+    public int? PaymentId { get; set; }
+
+    [Column("client_id")]
+    public int? ClientId { get; set; }
+
+    [Column("amount")]
+    public decimal Amount { get; set; }
+
+    [Column("reason")]
+    public string? Reason { get; set; }
+
+    [Column("status")]
+    public string? Status { get; set; }
+
+    [Column("processed_by")]
+    public int? ProcessedBy { get; set; }
+
+    [Column("created_at")]
+    public DateTime? CreatedAt { get; set; }
+}
+
+[Table("Settlements")]
+public class Settlement
+{
+    [Key]
+    [Column("settlement_id")]
+    public int SettlementId { get; set; }
+
+    [Column("record_type")]
+    public string? RecordType { get; set; }
+
+    [Column("courier_trip")]
+    public string? CourierTrip { get; set; }
+
+    [Column("amount")]
+    public decimal Amount { get; set; }
+
+    [Column("submitted_by")]
+    public int? SubmittedBy { get; set; }
+
+    [Column("submitted_at")]
+    public DateTime? SubmittedAt { get; set; }
+
+    [Column("status")]
+    public string? Status { get; set; }
+
+    [Column("validated_by")]
+    public int? ValidatedBy { get; set; }
+
+    [Column("validated_at")]
+    public DateTime? ValidatedAt { get; set; }
+
+    [Column("created_at")]
+    public DateTime? CreatedAt { get; set; }
+}
+
+[Table("AIReviewHistory")]
+public class AIReviewHistory
+{
+    [Key]
+    [Column("review_id")]
+    public int ReviewId { get; set; }
+
+    [Column("document_number")]
+    public string? DocumentNumber { get; set; }
+
+    [Column("final_decision")]
+    public string? FinalDecision { get; set; }
+
+    [Column("reviewer")]
+    public string? Reviewer { get; set; }
+
+    [Column("decision_reason")]
+    public string? DecisionReason { get; set; }
+
+    [Column("reviewed_date")]
+    public DateTime? ReviewedDate { get; set; }
+
+    [Column("created_at")]
+    public DateTime? CreatedAt { get; set; }
+}
+
+[Table("AIOutputHistory")]
+public class AIOutputHistory
+{
+    [Key]
+    [Column("output_id")]
+    public int OutputId { get; set; }
+
+    [Column("output_type")]
+    public string? OutputType { get; set; }
+
+    [Column("source_reference")]
+    public string? SourceReference { get; set; }
+
+    [Column("processing_status")]
+    public string? ProcessingStatus { get; set; }
+
+    [Column("model_name")]
+    public string? ModelName { get; set; }
+
+    [Column("version")]
+    public string? Version { get; set; }
+
+    [Column("message")]
+    public string? Message { get; set; }
+
+    [Column("created_at")]
+    public DateTime? CreatedAt { get; set; }
+}
+

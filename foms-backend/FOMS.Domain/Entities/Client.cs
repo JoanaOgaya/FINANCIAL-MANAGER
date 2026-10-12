@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace FOMS.Domain.Entities;
 
@@ -19,6 +20,8 @@ public class Client
     public decimal TotalBilled { get; set; }
     public decimal TotalPaid { get; set; }
     public string Status { get; set; } = "Active"; // "Active" or "Inactive"
+    [NotMapped]
+    public bool IsRealData { get; set; } = false; // true if the record represents real production data
     public bool IsActive { get; set; } = true;
     public string DmsClientId { get; set; } = string.Empty;
     public string DmsStatus { get; set; } = "Active";

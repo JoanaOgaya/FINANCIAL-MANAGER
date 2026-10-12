@@ -16,7 +16,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\FOMS.Infrastructure\FOMS.Infrastructure.csproj" />
+    <ProjectReference Include="..\FOMS.Api\FOMS.Api.csproj" />
   </ItemGroup>
 
   <ItemGroup>

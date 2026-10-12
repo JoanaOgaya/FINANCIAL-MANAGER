@@ -30,19 +30,24 @@ public class SeededAccountsTests
     {
         try
         {
-            var options = new DbContextOptionsBuilder<ApplicationDbContext>()
-                .UseSqlServer(
-                    @"Server=localhost\SQLEXPRESS;Database=FOMSDB;Trusted_Connection=True;TrustServerCertificate=True;Connect Timeout=60;Command Timeout=120;Min Pool Size=1;Max Pool Size=20;",
-                    b =>
-                    {
-                        b.CommandTimeout(120);
-                        b.EnableRetryOnFailure(maxRetryCount: 3, maxRetryDelay: TimeSpan.FromSeconds(5), errorNumbersToAdd: null);
-                    })
+            var hash = FOMS.Application.Services.AuthService.HashPassword("PASSWORD@123");
+            var options = new DbContextOptionsBuilder<FOMS.Infrastructure.Persistence.FomsDbContext>()
+                .UseSqlServer(@"Server=localhost\SQLEXPRESS;Database=FOMS_DB;Trusted_Connection=True;TrustServerCertificate=True;")
                 .Options;
 
-            await using var context = new ApplicationDbContext(options);
+            await using var context = new FOMS.Infrastructure.Persistence.FomsDbContext(options);
+            var user = await context.Users.FirstOrDefaultAsync(u => u.EmployeeNumber == "EMP-001");
+            if (user != null)
+            {
+                user.PasswordHash = hash;
+                user.IsActive = true;
+                user.RoleId = 1;
+            }
+            await context.SaveChangesAsync();
 
-            await ApplicationDbContextSeed.SeedSampleDataAsync(context);
+            // Also update Employees table
+            await context.Database.ExecuteSqlRawAsync(
+                "UPDATE Employees SET PasswordHash = {0}, Role = 'Financial Manager', IsActive = 1, Status = 'Active' WHERE Id = 'EMP-001'", hash);
         }
         catch
         {

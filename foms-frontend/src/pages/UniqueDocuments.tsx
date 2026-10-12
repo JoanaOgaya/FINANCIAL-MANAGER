@@ -41,21 +41,29 @@ const UniqueDocuments: React.FC = () => {
     {
       key: 'type',
       label: 'DOCUMENT TYPE',
-      render: (row) => (
-        <span
-          style={{
-            display: 'inline-block',
-            padding: '2px 8px',
-            borderRadius: '6px',
-            fontSize: '0.75rem',
-            fontWeight: 700,
-            background: row.type === 'Invoice' ? '#EFF6FF' : '#F0FDF4',
-            color: row.type === 'Invoice' ? '#2563EB' : '#16A34A',
-          }}
-        >
-          {row.type}
-        </span>
-      ),
+      render: (row) => {
+        const typeStr = row.type || row.documentType || 'Invoice';
+        const isInvoice = typeStr.toLowerCase().includes('invoice');
+        const isReceipt = typeStr.toLowerCase().includes('receipt');
+        const isLiq = typeStr.toLowerCase().includes('liquidation');
+        const bg = isInvoice ? '#EFF6FF' : isReceipt ? '#F0FDF4' : '#FEF3C7';
+        const color = isInvoice ? '#2563EB' : isReceipt ? '#16A34A' : '#D97706';
+        return (
+          <span
+            style={{
+              display: 'inline-block',
+              padding: '2px 8px',
+              borderRadius: '6px',
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              background: bg,
+              color: color,
+            }}
+          >
+            {typeStr}
+          </span>
+        );
+      },
     },
     {
       key: 'orInvoiceNumber',
@@ -128,6 +136,16 @@ const UniqueDocuments: React.FC = () => {
     if (key === 'dateFrom') setDateFrom(value);
   };
 
+  const displayedItems = items.filter((row: any) => {
+    if (!docTypeFilter || docTypeFilter === 'All') return true;
+    const t = (row.type || row.documentType || '').toLowerCase();
+    const f = docTypeFilter.toLowerCase();
+    if (f === 'invoice') return t.includes('invoice');
+    if (f === 'receipt' || f.includes('receipt')) return t.includes('receipt');
+    if (f === 'liquidation' || f.includes('liquidation')) return t.includes('liquidation');
+    return t.includes(f);
+  });
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <PageHeader
@@ -160,10 +178,10 @@ const UniqueDocuments: React.FC = () => {
       />
 
       <DataTable
-        rows={items}
+        rows={displayedItems}
         columns={columns}
         rowKey={(r) => r.id}
-        total={total}
+        total={displayedItems.length}
         page={page}
         pageSize={pageSize}
         onPageChange={setPage}

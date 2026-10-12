@@ -1,4 +1,4 @@
-﻿using System.Threading.Tasks;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using FOMS.Application.DTOs;
@@ -8,6 +8,8 @@ namespace FOMS.Api.Controllers;
 
 [Authorize]
 [Route("api/users")]
+[Route("api/v1/users")]
+[Route("users")]
 [ApiController]
 public class UsersController : ControllerBase
 {

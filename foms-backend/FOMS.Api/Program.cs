@@ -64,10 +64,20 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("FomsPolicy", policy =>
     {
-        policy.WithOrigins(allowedOrigins)
-              .AllowAnyMethod()
-              .AllowAnyHeader()
-              .AllowCredentials();
+        if (builder.Environment.IsDevelopment())
+        {
+            policy.SetIsOriginAllowed(origin => true)
+                  .AllowAnyMethod()
+                  .AllowAnyHeader()
+                  .AllowCredentials();
+        }
+        else
+        {
+            policy.WithOrigins(allowedOrigins)
+                  .AllowAnyMethod()
+                  .AllowAnyHeader()
+                  .AllowCredentials();
+        }
     });
 });
 
@@ -224,6 +234,20 @@ app.UseSwaggerUI(c =>
     c.RoutePrefix = "swagger";
 });
 
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path.Value ?? string.Empty;
+    if (!path.StartsWith("/api", StringComparison.OrdinalIgnoreCase) &&
+        !path.StartsWith("/swagger", StringComparison.OrdinalIgnoreCase) &&
+        !path.StartsWith("/ws", StringComparison.OrdinalIgnoreCase) &&
+        !string.IsNullOrEmpty(path) && path != "/")
+    {
+        context.Request.Path = "/api" + path;
+    }
+    await next();
+});
+
+app.UseRouting();
 app.UseCors("FomsPolicy");
 app.UseAuthentication();
 app.UseAuthorization();

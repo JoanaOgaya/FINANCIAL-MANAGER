@@ -1,4 +1,4 @@
-﻿using System.Threading.Tasks;
+using System.Threading.Tasks;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -8,6 +8,7 @@ namespace FOMS.Api.Controllers;
 
 [Route("api/adjustments")]
 [Route("api/v1/adjustments")]
+[Route("adjustments")]
 public class AdjustmentsController : ApiControllerBase
 {
     /// <summary>
@@ -19,7 +20,27 @@ public class AdjustmentsController : ApiControllerBase
     public async Task<IActionResult> GetAdjustments()
     {
         var list = await Mediator.Send(new AdjustmentFeatures.GetAdjustmentsQuery());
-        return Ok(list);
+        var mapped = list.Select(a => new
+        {
+            id = a.Id,
+            type = a.AdjustmentType == "Credit" ? "Credit Memo" : "Adjustment",
+            amount = a.Amount,
+            reason = a.Reason,
+            referenceNo = a.Id,
+            status = a.Status == "Pending" ? "Pending Approval" : a.Status,
+            affectedRecordId = a.InvoiceNo,
+            clientId = "CA-001",
+            createdAt = !string.IsNullOrEmpty(a.DateRequested) ? a.DateRequested : DateTime.UtcNow.ToString("yyyy-MM-dd"),
+            createdBy = !string.IsNullOrEmpty(a.AdjustedBy) ? a.AdjustedBy : "Bookkeeper",
+            remarks = a.Reason,
+            a.InvoiceNo,
+            a.AdjustmentType,
+            a.AdjustedBy,
+            a.DateRequested,
+            a.ApprovedBy,
+            a.DateApproved
+        }).ToList();
+        return Ok(mapped);
     }
 
     /// <summary>
@@ -57,6 +78,7 @@ public class AdjustmentsController : ApiControllerBase
     /// </summary>
     [Authorize]
     [HttpPut("{id}/approve")]
+    [HttpPost("{id}/approve")]
     public async Task<IActionResult> Approve(string id)
     {
         var user = User.FindFirst("name")?.Value ?? User.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown User";
@@ -68,11 +90,12 @@ public class AdjustmentsController : ApiControllerBase
     }
 
     /// <summary>
-    /// PUT /api/v1/adjustments/{id}/reject â€” Accountant rejects a pending adjustment.
+    /// PUT or POST /api/v1/adjustments/{id}/reject — Accountant rejects a pending adjustment.
     /// No balance change is applied.
     /// </summary>
     [Authorize]
     [HttpPut("{id}/reject")]
+    [HttpPost("{id}/reject")]
     public async Task<IActionResult> Reject(string id)
     {
         var user = User.FindFirst("name")?.Value ?? User.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown User";

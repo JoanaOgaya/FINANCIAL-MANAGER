@@ -949,6 +949,7 @@ const PaymentsContent: React.FC = () => {
       ...p,
       clientName: (p as any).clientName || cli?.name || p.clientId || '—',
       invoiceNumber: (p as any).invoiceNumber || invoice?.invoiceNumber || p.invoiceId || '—',
+      recordedAt: p.recordedAt || (p as any).paymentDate || (p as any).dateRecorded || (p as any).submittedAt || (p as any).createdAt,
       type: 'Inflow' as const,
       classification: 'Client Collection',
     };
@@ -1493,7 +1494,7 @@ const PaymentsContent: React.FC = () => {
             },
             {
               key: 'recordedAt', label: 'DATE', sortable: true,
-              render: (row: any) => safeFormatDate(row.recordedAt)
+              render: (row: any) => safeFormatDate(row.recordedAt || row.paymentDate || row.dateRecorded || row.submittedAt || row.createdAt || row.date)
             },
             {
               key: 'status', label: 'STATUS',

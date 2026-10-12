@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -12,8 +12,11 @@ using FOMS.Domain.Entities;
 namespace FOMS.Api.Controllers;
 
 [Authorize]
+[Route("receivables")]
+[Route("ar")]
 [Route("api/receivables")]
 [Route("api/v1/receivables")]
+[Route("api/ar")]
 [ApiController]
 public class ReceivablesController : ControllerBase
 {
@@ -22,6 +25,77 @@ public class ReceivablesController : ControllerBase
     public ReceivablesController(IApplicationDbContext context)
     {
         _context = context;
+    }
+
+    [HttpGet("records")]
+    public async Task<IActionResult> GetArRecords()
+    {
+        var invoices = await _context.Invoices.Where(i => !i.Archived).ToListAsync();
+        foreach (var inv in invoices)
+        {
+            BillingComputationService.RefreshInvoiceAging(inv);
+        }
+
+        var records = invoices.Select(i =>
+        {
+            var isDueSoon = DateTime.TryParse(i.DueDate, out var dt) && (dt - DateTime.UtcNow).TotalDays <= 7 && (dt - DateTime.UtcNow).TotalDays >= 0;
+            return new
+            {
+                id = i.Id,
+                invoiceId = i.Id,
+                invoiceNumber = i.InvoiceNo,
+                clientId = i.ClientId,
+                clientName = !string.IsNullOrEmpty(i.ClientName) ? i.ClientName : $"Client {i.ClientId}",
+                invoiceDate = i.BillingDate,
+                dueDate = i.DueDate,
+                originalAmount = i.TotalAmount,
+                paidAmount = i.AmountPaid,
+                outstandingBalance = i.Balance,
+                agingBracket = i.DaysOverdue <= 0 ? "Current" :
+                               i.DaysOverdue <= 30 ? "0-30 days" :
+                               i.DaysOverdue <= 60 ? "31-60 days" :
+                               i.DaysOverdue <= 90 ? "61-90 days" : "90+ days",
+                agingDays = i.DaysOverdue,
+                status = i.Balance <= 0 ? "Current" :
+                         i.DaysOverdue > 0 ? "Overdue" :
+                         isDueSoon ? "Due Soon" : "Outstanding"
+            };
+        }).ToList();
+
+        return Ok(records);
+    }
+
+    [HttpGet("aging")]
+    public async Task<IActionResult> GetArAging()
+    {
+        var invoices = await _context.Invoices.Where(i => !i.Archived && i.Balance > 0).ToListAsync();
+        foreach (var inv in invoices)
+        {
+            BillingComputationService.RefreshInvoiceAging(inv);
+        }
+
+        var result = new List<object>
+        {
+            new { label = "Current", value = invoices.Where(i => i.DaysOverdue <= 0).Sum(i => i.Balance) },
+            new { label = "0-30 days", value = invoices.Where(i => i.DaysOverdue > 0 && i.DaysOverdue <= 30).Sum(i => i.Balance) },
+            new { label = "31-60 days", value = invoices.Where(i => i.DaysOverdue > 30 && i.DaysOverdue <= 60).Sum(i => i.Balance) },
+            new { label = "61-90 days", value = invoices.Where(i => i.DaysOverdue > 60 && i.DaysOverdue <= 90).Sum(i => i.Balance) },
+            new { label = "90+ days", value = invoices.Where(i => i.DaysOverdue > 90).Sum(i => i.Balance) },
+        };
+
+        return Ok(result);
+    }
+
+    [HttpGet("follow-ups")]
+    public IActionResult GetFollowUps()
+    {
+        return Ok(new List<object>());
+    }
+
+    [HttpPost("follow-ups")]
+    public IActionResult LogFollowUp([FromBody] object body)
+    {
+        return Ok(body);
     }
 
     /// <summary>

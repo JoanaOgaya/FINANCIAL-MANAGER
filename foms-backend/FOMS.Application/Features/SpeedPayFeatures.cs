@@ -593,19 +593,13 @@ public static class SpeedPayFeatures
                 transaction.ReceiptUrl = receiptUrl;
                 transaction.UpdatedAt = DateTime.UtcNow;
 
-                // Find matching invoice
-                Invoice? invoice = null;
-                if (!string.IsNullOrEmpty(transaction.InvoiceNo))
-                {
-                    invoice = await _context.Invoices.FirstOrDefaultAsync(i => i.InvoiceNo == transaction.InvoiceNo, cancellationToken);
-                }
-                else
-                {
-                    invoice = await _context.Invoices
-                        .Where(i => i.ClientId == transaction.ClientId)
-                        .OrderByDescending(i => i.DueDate)
-                        .FirstOrDefaultAsync(cancellationToken);
-                }
+                // Find matching invoice(s)
+                var clientInvoices = await _context.Invoices
+                    .Where(i => i.ClientId == transaction.ClientId || (!string.IsNullOrEmpty(transaction.InvoiceNo) && i.InvoiceNo == transaction.InvoiceNo))
+                    .ToListAsync(cancellationToken);
+
+                Invoice? invoice = clientInvoices.FirstOrDefault(i => !string.IsNullOrEmpty(transaction.InvoiceNo) && i.InvoiceNo == transaction.InvoiceNo)
+                                ?? clientInvoices.OrderByDescending(i => i.DueDate).FirstOrDefault();
 
                 // If shipment is attached, keep status pending until validated
                 if (transaction.ShipmentRecord != null)
@@ -615,12 +609,11 @@ public static class SpeedPayFeatures
                 }
 
                 // Update Invoice to show payment is pending validation
-                if (invoice != null)
+                foreach (var inv in clientInvoices)
                 {
-                    invoice.PaymentStatus = "Pending Payment Validation";
-                    invoice.PaymentValidationStatus = "Pending Validation";
-                    invoice.UpdatedBy = "SpeedPay Gateway";
-                    _context.Invoices.Update(invoice);
+                    inv.PaymentStatus = "Pending Payment Validation";
+                    inv.PaymentValidationStatus = "Pending Validation";
+                    inv.UpdatedBy = "SpeedPay Gateway";
                 }
 
                 // Create Pending Payment record

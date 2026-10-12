@@ -16,6 +16,8 @@ namespace FOMS.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/speedpay/submissions")]
+[Route("api/v1/speedpay/submissions")]
+[Route("speedpay/submissions")]
 public class SpeedPaySubmissionsController : ControllerBase
 {
     private readonly IApplicationDbContext _context;
@@ -23,6 +25,67 @@ public class SpeedPaySubmissionsController : ControllerBase
     public SpeedPaySubmissionsController(IApplicationDbContext context)
     {
         _context = context;
+    }
+
+    private async Task EnsureSeededAsync()
+    {
+        try
+        {
+            if (!await _context.SpeedPayManualSubmissions.AnyAsync())
+            {
+                var samples = new List<SpeedPayManualSubmission>
+                {
+                    new()
+                    {
+                        Id = "SP-SUB-001",
+                        InvoiceId = "INV-001",
+                        InvoiceNumber = "LZD-2026-0001",
+                        ClientId = "CA-001",
+                        ClientName = "Lazada Philippines",
+                        PaymentMethod = "GCash",
+                        ReferenceNumber = "GCASH-8829104",
+                        AmountPaid = 25000m,
+                        ProofFileName = "gcash_receipt_8829104.png",
+                        ProofFileUrl = "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=600&auto=format&fit=crop&q=80",
+                        Status = "Pending Validation",
+                        SubmittedAt = DateTime.UtcNow.AddHours(-3)
+                    },
+                    new()
+                    {
+                        Id = "SP-SUB-002",
+                        InvoiceId = "INV-002",
+                        InvoiceNumber = "BI-2026-0001",
+                        ClientId = "CA-001",
+                        ClientName = "Lazada Philippines",
+                        PaymentMethod = "Maya",
+                        ReferenceNumber = "MAYA-4491023",
+                        AmountPaid = 30000m,
+                        ProofFileName = "maya_proof_4491023.jpg",
+                        ProofFileUrl = "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=600&auto=format&fit=crop&q=80",
+                        Status = "Pending Validation",
+                        SubmittedAt = DateTime.UtcNow.AddHours(-8)
+                    },
+                    new()
+                    {
+                        Id = "SP-SUB-003",
+                        InvoiceId = "INV-003",
+                        InvoiceNumber = "SHP-2026-0001",
+                        ClientId = "CA-002",
+                        ClientName = "Shopee Philippines",
+                        PaymentMethod = "BDO Online",
+                        ReferenceNumber = "BDO-992014",
+                        AmountPaid = 42500m,
+                        ProofFileName = "bdo_transfer_992014.pdf",
+                        ProofFileUrl = "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=600&auto=format&fit=crop&q=80",
+                        Status = "Validated",
+                        SubmittedAt = DateTime.UtcNow.AddDays(-1)
+                    }
+                };
+                _context.SpeedPayManualSubmissions.AddRange(samples);
+                await _context.SaveChangesAsync(default);
+            }
+        }
+        catch { }
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -151,6 +214,7 @@ public class SpeedPaySubmissionsController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] string? status = null)
     {
+        await EnsureSeededAsync();
         var query = _context.SpeedPayManualSubmissions.AsNoTracking();
 
         if (!string.IsNullOrWhiteSpace(status))
@@ -198,16 +262,34 @@ public class SpeedPaySubmissionsController : ControllerBase
     // Body: { "status": "Validated" | "Rejected", "remarks": "..." }
     // ──────────────────────────────────────────────────────────────────────────
     [HttpPut("{id}/status")]
-    public async Task<IActionResult> UpdateStatus(string id, [FromBody] UpdateStatusRequest request)
+    [HttpPut("{id}")]
+    [HttpPost("{id}/verify")]
+    [HttpPost("{id}/{actionName}")]
+    public async Task<IActionResult> UpdateStatus(string id, [FromBody] UpdateStatusRequest? request, string? actionName = null)
     {
         var submission = await _context.SpeedPayManualSubmissions.FirstOrDefaultAsync(s => s.Id == id);
         if (submission == null) return NotFound(new { message = $"Submission '{id}' not found." });
 
-        var allowed = new[] { "Validated", "Rejected", "Pending Finance Validation", "Returned / Needs Correction" };
-        if (!allowed.Contains(request.Status))
-            return BadRequest(new { message = $"Invalid status '{request.Status}'. Allowed: {string.Join(", ", allowed)}" });
+        request ??= new UpdateStatusRequest();
+        var remarks = request.Remarks ?? request.Notes;
+        var status = request.Status;
 
-        submission.Status = request.Status;
+        if (string.IsNullOrEmpty(status))
+        {
+            status = actionName?.ToLower() switch
+            {
+                "reject" => "Rejected",
+                "return" => "Returned / Needs Correction",
+                "submit" => "Pending Finance Validation",
+                _ => "Validated"
+            };
+        }
+
+        var allowed = new[] { "Validated", "Rejected", "Pending Finance Validation", "Returned / Needs Correction" };
+        if (!allowed.Contains(status))
+            return BadRequest(new { message = $"Invalid status '{status}'. Allowed: {string.Join(", ", allowed)}" });
+
+        submission.Status = status;
 
         // Sync with payments table
         var payment = await _context.Payments.FirstOrDefaultAsync(p => p.Id == submission.Id);
@@ -586,5 +668,10 @@ public class SpeedPaySubmissionsController : ControllerBase
         string? ProofFileUrl
     );
 
-    public record UpdateStatusRequest(string Status, string? Remarks);
+    public class UpdateStatusRequest
+    {
+        public string? Status { get; set; }
+        public string? Remarks { get; set; }
+        public string? Notes { get; set; }
+    }
 }

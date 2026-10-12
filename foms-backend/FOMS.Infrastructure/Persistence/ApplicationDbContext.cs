@@ -59,6 +59,8 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
     {
         base.OnModelCreating(modelBuilder);
 
+        modelBuilder.Entity<Client>().Ignore(c => c.IsRealData);
+
         modelBuilder.Entity<AuditLog>().ToTable("AppAuditLogs");
 
         modelBuilder.Entity<PaymentTransaction>(entity =>

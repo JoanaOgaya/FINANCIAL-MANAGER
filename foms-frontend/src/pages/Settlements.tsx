@@ -331,7 +331,7 @@ const Settlements: React.FC = () => {
                     <div style={{ fontWeight: 800, color: row.type === 'Leftover return' ? '#10B981' : '#3B82F6' }}>
                       {formatCurrency(row.amount)}
                     </div>
-                    {row.discrepancy && (
+                    {Boolean(row.discrepancy && row.discrepancy !== 0) && (
                       <div style={{ fontSize: '11px', color: '#EA580C', fontWeight: 600, marginTop: '2px' }}>
                         Discrepancy {formatCurrency(row.discrepancy)}
                       </div>

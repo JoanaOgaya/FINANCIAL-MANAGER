@@ -29,6 +29,40 @@ public static class AdjustmentFeatures
 
         public async Task<List<PaymentAdjustment>> Handle(GetAdjustmentsQuery request, CancellationToken cancellationToken)
         {
+            if (!await _context.PaymentAdjustments.AnyAsync(cancellationToken))
+            {
+                var samples = new List<PaymentAdjustment>
+                {
+                    new()
+                    {
+                        Id = "ADJ-001",
+                        InvoiceNo = "LZD-2026-0001",
+                        AdjustmentType = "Credit",
+                        Amount = 2500m,
+                        Reason = "Volume tier discount correction for Q3 shipments",
+                        AdjustedBy = "Bookkeeper",
+                        ApprovedBy = "Crystalyn Joyce C. Fajardo",
+                        DateRequested = DateTime.UtcNow.AddDays(-1).ToString("yyyy-MM-dd"),
+                        Status = "Pending"
+                    },
+                    new()
+                    {
+                        Id = "ADJ-002",
+                        InvoiceNo = "BI-2026-0001",
+                        AdjustmentType = "Debit",
+                        Amount = 1200m,
+                        Reason = "Special delivery surcharge addition",
+                        AdjustedBy = "Bookkeeper",
+                        ApprovedBy = "Crystalyn Joyce C. Fajardo",
+                        DateRequested = DateTime.UtcNow.AddDays(-3).ToString("yyyy-MM-dd"),
+                        DateApproved = DateTime.UtcNow.AddDays(-2).ToString("yyyy-MM-dd"),
+                        Status = "Approved"
+                    }
+                };
+                _context.PaymentAdjustments.AddRange(samples);
+                await _context.SaveChangesAsync(cancellationToken);
+            }
+
             // Return newest first so the list is always up-to-date on screen
             return await _context.PaymentAdjustments
                 .OrderByDescending(a => a.DateRequested)

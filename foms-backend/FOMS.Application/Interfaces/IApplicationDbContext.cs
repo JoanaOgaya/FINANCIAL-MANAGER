@@ -3,6 +3,8 @@ using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using FOMS.Domain.Entities;
+// Removed incorrect SqlServer aliases – the needed types exist in the general domain namespace.
+
 
 namespace FOMS.Application.Interfaces;
 
@@ -12,8 +14,8 @@ public interface IApplicationDbContext
     DbSet<Client> Clients { get; }
     DbSet<Invoice> Invoices { get; }
     DbSet<Payment> Payments { get; }
-    DbSet<Employee> Employees { get; }
-    DbSet<ActivityLog> ActivityLogs { get; }
+    DbSet<FOMS.Domain.Entities.Employee> Employees { get; }
+    DbSet<FOMS.Domain.Entities.ActivityLog> ActivityLogs { get; }
     DbSet<Notification> Notifications { get; }
     DbSet<ShipmentRate> ShipmentRates { get; }
     DbSet<SpeedPayTransaction> SpeedPayTransactions { get; }
@@ -24,30 +26,30 @@ public interface IApplicationDbContext
     DbSet<SupportTicket> SupportTickets { get; }
     DbSet<PaymentValidation> PaymentValidations { get; }
     DbSet<Role> Roles { get; }
-    DbSet<RefreshToken> RefreshTokens { get; }
-    DbSet<UserActivityLog> UserActivityLogs { get; }
+    DbSet<FOMS.Domain.Entities.RefreshToken> RefreshTokens { get; }
+    DbSet<FOMS.Domain.Entities.UserActivityLog> UserActivityLogs { get; }
     DbSet<AuditLog> AuditLogs { get; }
-    DbSet<ShipmentRecord> ShipmentRecords { get; }
-    DbSet<ShipmentPricing> ShipmentPricings { get; }
-    DbSet<StatementOfAccount> StatementOfAccounts { get; }
-    DbSet<PaymentCollection> PaymentCollections { get; }
+    DbSet<FOMS.Domain.Entities.ShipmentRecord> ShipmentRecords { get; }
+    DbSet<FOMS.Domain.Entities.ShipmentPricing> ShipmentPricings { get; }
+    DbSet<FOMS.Domain.Entities.StatementOfAccount> StatementOfAccounts { get; }
+    DbSet<FOMS.Domain.Entities.PaymentCollection> PaymentCollections { get; }
     DbSet<OfficialReceipt> OfficialReceipts { get; }
-    DbSet<ReceivableBalance> ReceivableBalances { get; }
-    DbSet<AgingAccount> AgingAccounts { get; }
-    DbSet<ChartOfAccount> ChartOfAccounts { get; }
-    DbSet<GeneralLedgerEntry> GeneralLedgerEntries { get; }
-    DbSet<JournalEntry> JournalEntries { get; }
-    DbSet<TrialBalance> TrialBalances { get; }
-    DbSet<PayrollRecord> PayrollRecords { get; }
-    DbSet<Payslip> Payslips { get; }
-    DbSet<BankAdviceRecord> BankAdviceRecords { get; }
-    DbSet<PaymentConcernTicket> PaymentConcernTickets { get; }
-    DbSet<DeliveryPaymentValidation> DeliveryPaymentValidations { get; }
-    DbSet<PaymentTransaction> PaymentTransactions { get; }
-    DbSet<PaymentReceipt> PaymentReceipts { get; }
-    DbSet<CashFlowTransaction> CashFlowTransactions { get; }
-    DbSet<OfficialReceiptSequence> OfficialReceiptSequences { get; }
-    DbSet<PayrollDeductionLine> PayrollDeductionLines { get; }
+    DbSet<FOMS.Domain.Entities.ReceivableBalance> ReceivableBalances { get; }
+    DbSet<FOMS.Domain.Entities.AgingAccount> AgingAccounts { get; }
+    DbSet<FOMS.Domain.Entities.ChartOfAccount> ChartOfAccounts { get; }
+    DbSet<FOMS.Domain.Entities.GeneralLedgerEntry> GeneralLedgerEntries { get; }
+    DbSet<FOMS.Domain.Entities.JournalEntry> JournalEntries { get; }
+    DbSet<FOMS.Domain.Entities.TrialBalance> TrialBalances { get; }
+    DbSet<FOMS.Domain.Entities.PayrollRecord> PayrollRecords { get; }
+    DbSet<FOMS.Domain.Entities.Payslip> Payslips { get; }
+    DbSet<FOMS.Domain.Entities.BankAdviceRecord> BankAdviceRecords { get; }
+    DbSet<FOMS.Domain.Entities.PaymentConcernTicket> PaymentConcernTickets { get; }
+    DbSet<FOMS.Domain.Entities.DeliveryPaymentValidation> DeliveryPaymentValidations { get; }
+    DbSet<FOMS.Domain.Entities.PaymentTransaction> PaymentTransactions { get; }
+    DbSet<FOMS.Domain.Entities.PaymentReceipt> PaymentReceipts { get; }
+    DbSet<FOMS.Domain.Entities.CashFlowTransaction> CashFlowTransactions { get; }
+    DbSet<FOMS.Domain.Entities.OfficialReceiptSequence> OfficialReceiptSequences { get; }
+    DbSet<FOMS.Domain.Entities.PayrollDeductionLine> PayrollDeductionLines { get; }
     DbSet<PaymentHistory> PaymentHistories { get; }
 
     /// <summary>

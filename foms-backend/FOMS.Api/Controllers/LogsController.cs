@@ -1,9 +1,11 @@
-﻿using System.Threading.Tasks;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using FOMS.Application.Features;
 
 namespace FOMS.Api.Controllers;
 
+[Route("api/logs")]
+[Route("logs")]
 public class LogsController : ApiControllerBase
 {
     [HttpGet]

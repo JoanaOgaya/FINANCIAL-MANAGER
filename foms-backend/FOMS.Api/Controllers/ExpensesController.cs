@@ -1,4 +1,4 @@
-﻿using System.Threading.Tasks;
+using System.Threading.Tasks;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -7,6 +7,8 @@ using FOMS.Application.Features;
 namespace FOMS.Api.Controllers;
 
 [Authorize]
+[Route("api/expenses")]
+[Route("expenses")]
 public class ExpensesController : ApiControllerBase
 {
     [Authorize]

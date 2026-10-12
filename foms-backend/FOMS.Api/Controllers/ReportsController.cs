@@ -1,4 +1,4 @@
-﻿using System.Threading.Tasks;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using FOMS.Application.Interfaces;
@@ -8,6 +8,8 @@ namespace FOMS.Api.Controllers;
 
 [Authorize]
 [Route("api/reports")]
+[Route("api/v1/reports")]
+[Route("reports")]
 [ApiController]
 public class ReportsController : ControllerBase
 {
@@ -16,6 +18,20 @@ public class ReportsController : ControllerBase
     public ReportsController(IReportService reportService)
     {
         _reportService = reportService;
+    }
+
+    [HttpGet]
+    public IActionResult GetAll()
+    {
+        var reports = new[]
+        {
+            new { id = "REP-001", name = "Accounts Receivable Aging Report", type = "accounts-receivable", generatedBy = "System", generatedAt = System.DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss") },
+            new { id = "REP-002", name = "Daily Collection Summary", type = "collection-summary", generatedBy = "System", generatedAt = System.DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss") },
+            new { id = "REP-003", name = "Financial Statements Summary", type = "financial-statements", generatedBy = "System", generatedAt = System.DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss") },
+            new { id = "REP-004", name = "General Ledger Summary", type = "general-ledger", generatedBy = "System", generatedAt = System.DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss") },
+            new { id = "REP-005", name = "Payroll Report", type = "payroll", generatedBy = "System", generatedAt = System.DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss") }
+        };
+        return Ok(reports);
     }
 
     [HttpGet("accounts-receivable")]
