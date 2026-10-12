@@ -5,6 +5,7 @@ import { Search, ChevronDown, ChevronUp, UploadCloud, X, Camera, CheckCircle2, C
 import { motion, AnimatePresence } from 'framer-motion';
 import html2canvas from 'html2canvas';
 import { useToast } from '../components/ToastContext';
+import { QrPhPaymentView } from '../components/QrPhPaymentView';
 
 // Helper to convert number to words for PHP amounts
 function numberToWords(amount: number): string {
@@ -121,16 +122,13 @@ export const MyInvoices: React.FC = () => {
       const fomsRes = await fetch('/api/speedpay/initiate-invoice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ invoiceNo: payInvoice.invoiceNumber, amount: payInvoice.amount, paymentMethod: 'card', returnUrl: window.location.origin + '/invoices' })
+        body: JSON.stringify({ invoiceNo: payInvoice.invoiceNumber, amount: payInvoice.amount, paymentMethod: 'qrph', returnUrl: window.location.origin + '/invoices' })
       });
       if (fomsRes.ok) {
         const d = await fomsRes.json();
-        if (d?.checkoutUrl && !d.checkoutUrl.includes('mock-checkout')) {
-          window.open(d.checkoutUrl, '_blank');
-        }
-        setReferenceNo(d.referenceOrNumber || d.payMongoCheckoutId || `PAY-${Math.floor(1000000 + Math.random() * 9000000)}`);
+        setReferenceNo(d?.referenceOrNumber || d?.payMongoCheckoutId || `PAY-${Math.floor(1000000 + Math.random() * 9000000)}`);
         setShowCheckoutModal(true);
-        setCheckoutStep(d.checkoutUrl?.includes('mock-checkout') ? 2 : 3);
+        setCheckoutStep(2);
         return;
       }
     } catch (_) {}
@@ -476,21 +474,13 @@ export const MyInvoices: React.FC = () => {
 
               <div style={{ padding: '32px 24px', overflowY: 'auto', flex: 1 }}>
 
-                {/* Step 2: Simulating */}
+                {/* Step 2: Simulating QR Ph */}
                 {checkoutStep === 2 && (
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '12px', borderBottom: '1px solid #F1F5F9', paddingBottom: '8px' }}>
-                      <span style={{ color: '#64748B' }}>Invoice Reference</span>
-                      <span style={{ fontWeight: 700, color: '#0F172A' }}>{payInvoice.invoiceNumber}</span>
-                    </div>
-                    <div style={{ background: '#F8FAFC', padding: '16px', borderRadius: '8px', margin: '20px 0 24px' }}>
-                      <span style={{ fontSize: '12px', color: '#64748B', display: 'block', marginBottom: '4px' }}>Total Amount Due</span>
-                      <div style={{ fontSize: '28px', fontWeight: 800, color: '#0F172A' }}>₱{payInvoice.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
-                    </div>
-                    <button onClick={() => setCheckoutStep(3)} style={{ width: '100%', background: '#0EA5E9', color: '#FFF', border: 'none', padding: '14px', borderRadius: '8px', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}>
-                      Simulate Payment Success →
-                    </button>
-                  </div>
+                  <QrPhPaymentView
+                    amount={payInvoice.amount}
+                    invoiceNumber={payInvoice.invoiceNumber}
+                    onSimulateSuccess={() => setCheckoutStep(3)}
+                  />
                 )}
 
                 {/* Step 3: Upload Proof */}

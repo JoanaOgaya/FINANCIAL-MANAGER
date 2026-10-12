@@ -372,7 +372,7 @@ public static class SpeedPayFeatures
                             quantity = 1
                         }
                     },
-                    payment_method_types = new[] { "card", "gcash", "paymaya", "dob", "qrph" },
+                    payment_method_types = new[] { "qrph" },
                     success_url = successUrl,
                     cancel_url = cancelUrl
                 }

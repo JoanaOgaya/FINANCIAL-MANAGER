@@ -31,7 +31,7 @@ export default defineConfig(({ mode }) => {
                   parsedBody = JSON.parse(body);
                   if (parsedBody && parsedBody.data && parsedBody.data.attributes) {
                     if (!parsedBody.data.attributes.payment_method_types) {
-                      parsedBody.data.attributes.payment_method_types = ['card', 'gcash', 'paymaya', 'dob', 'qrph'];
+                      parsedBody.data.attributes.payment_method_types = ['qrph'];
                     }
                   }
                 } catch {

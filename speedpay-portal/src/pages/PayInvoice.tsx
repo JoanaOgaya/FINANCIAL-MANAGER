@@ -4,6 +4,7 @@ import { useToast } from '../components/ToastContext';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { UploadCloud, X, Camera, CheckCircle2 } from 'lucide-react';
+import { QrPhPaymentView } from '../components/QrPhPaymentView';
 
 const MOCK_WAYBILLS = [
   {
@@ -95,23 +96,18 @@ export const PayInvoice: React.FC = () => {
         body: JSON.stringify({
           invoiceNo: selectedInvoice.invoiceNumber,
           amount: selectedInvoice.amount,
-          paymentMethod: paymentMethod.toLowerCase() === 'bank transfer' ? 'card' : paymentMethod.toLowerCase(),
+          paymentMethod: 'qrph',
           returnUrl: window.location.origin + '/pay-invoice'
         })
       });
 
       if (fomsRes.ok) {
         const fomsData = await fomsRes.json();
-        if (fomsData?.checkoutUrl) {
-          if (!fomsData.checkoutUrl.includes('mock-checkout')) {
-            window.open(fomsData.checkoutUrl, '_blank');
-            setCheckoutUrl(fomsData.checkoutUrl);
-          }
-          setReferenceNo(fomsData.referenceOrNumber || fomsData.payMongoCheckoutId || `PAY-${Math.floor(1000000 + Math.random() * 9000000)}`);
-          setShowModal(true);
-          setStep(fomsData.checkoutUrl.includes('mock-checkout') ? 2 : 3);
-          return;
-        }
+        setReferenceNo(fomsData?.referenceOrNumber || fomsData?.payMongoCheckoutId || `PAY-${Math.floor(1000000 + Math.random() * 9000000)}`);
+        setCheckoutUrl(fomsData?.checkoutUrl || '');
+        setShowModal(true);
+        setStep(2);
+        return;
       }
 
       // 2. Direct PayMongo Link fallback via Vite proxy middleware
@@ -366,32 +362,12 @@ export const PayInvoice: React.FC = () => {
 
               {/* Modal Body */}
               <div style={{ padding: '32px 24px', overflowY: 'auto', flex: 1 }}>
-                {step === 2 && (
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '12px', borderBottom: '1px solid #F1F5F9', paddingBottom: '8px' }}>
-                      <span style={{ color: '#64748B' }}>Invoice Reference</span>
-                      <span style={{ fontWeight: 700, color: '#0F172A' }}>{selectedInvoice?.invoiceNumber}</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '12px', borderBottom: '1px solid #F1F5F9', paddingBottom: '8px' }}>
-                      <span style={{ color: '#64748B' }}>Payment Method</span>
-                      <span style={{ fontWeight: 700, color: '#0EA5E9' }}>{paymentMethod}</span>
-                    </div>
-                    
-                    <div style={{ background: '#F8FAFC', padding: '16px', borderRadius: '8px', margin: '20px 0 24px' }}>
-                      <span style={{ fontSize: '12px', color: '#64748B', display: 'block', marginBottom: '4px' }}>Total Amount Due</span>
-                      <div style={{ fontSize: '28px', fontWeight: 800, color: '#0F172A' }}>
-                        ₱{selectedInvoice?.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                      </div>
-                    </div>
-
-                    <button 
-                      onClick={simulatePayMongoSuccess}
-                      style={{ width: '100%', background: '#10B981', color: '#FFF', border: 'none', padding: '14px', borderRadius: '8px', fontSize: '15px', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
-                    >
-                      Complete Payment & Attach Proof →
-                    </button>
-                    <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '12px' }}>PayMongo Gateway Simulation</div>
-                  </div>
+                {step === 2 && selectedInvoice && (
+                  <QrPhPaymentView
+                    amount={selectedInvoice.amount}
+                    invoiceNumber={selectedInvoice.invoiceNumber}
+                    onSimulateSuccess={simulatePayMongoSuccess}
+                  />
                 )}
 
                 {step === 3 && (
