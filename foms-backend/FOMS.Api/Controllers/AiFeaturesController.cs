@@ -75,7 +75,7 @@ public class AiFeaturesController : ApiControllerBase
         var fileNameLower = Path.GetFileNameWithoutExtension(file.FileName).ToLowerInvariant();
 
         // 1. Strict rejection of known non-financial categories (selfie, food, animal, meme, random scenery)
-        var rejectedKeywords = new[] { "selfie", "person", "human", "food", "cat", "dog", "animal", "pet", "scenery", "landscape", "nature", "wallpaper", "meme", "beach", "vacation", "trip", "family", "avatar", "profile", "id", "school", "pic", "random", "photo", "image", "screenshot" };
+        var rejectedKeywords = new[] { "selfie", "person", "human", "food", "cat", "dog", "animal", "pet", "scenery", "landscape", "nature", "wallpaper", "meme", "beach", "vacation", "trip", "family", "avatar", "profile", "id", "school", "pic", "random", "photo", "image", "screenshot", "quiz", "exam", "test", "homework", "assignment", "presentation", "slide", "grade" };
         var financeKeywords = new[] { "or", "receipt", "invoice", "inv", "billing", "bill", "soa", "statement", "payment", "pay", "liquidation", "voucher", "waybill", "wb", "pod", "speedpay" };
 
         bool hasFinanceMarker = financeKeywords.Any(k => fileNameLower.Contains(k));

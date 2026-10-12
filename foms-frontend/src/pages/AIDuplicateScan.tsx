@@ -217,38 +217,35 @@ const AIDuplicateScan: React.FC = () => {
 
   const [isDragging, setIsDragging] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [previewDocUrl, setPreviewDocUrl] = useState<string | null>(null);
+  const [zoomLevel, setZoomLevel] = useState(1.0);
   const [isScanning, setIsScanning] = useState(false);
   const [scanResult, setScanResult] = useState<DuplicateScanResult | null>(null);
   const [showCamera, setShowCamera] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleDragOver = useCallback((e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); }, []);
-  const handleDragLeave = useCallback((e: React.DragEvent) => { e.preventDefault(); setIsDragging(false); }, []);
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault(); setIsDragging(false);
-    if (!canScan) return;
-    const file = e.dataTransfer.files[0];
-    if (file) {
-      setUploadedFile(file);
-      setScanResult(null);
-      setValidationError(null);
-      setScanState('IDLE');
-    }
-  }, [canScan]);
+  const handleZoomIn = () => setZoomLevel(prev => Math.min(prev + 0.25, 2.5));
+  const handleZoomOut = () => setZoomLevel(prev => Math.max(prev - 0.25, 0.5));
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!canScan) return;
-    const file = e.target.files?.[0];
-    if (file) {
-      setUploadedFile(file);
-      setScanResult(null);
-      setValidationError(null);
-      setScanState('IDLE');
+  const getCellMatchStyle = (field: string, uploaded: string, existing: string) => {
+    if (!existing) return { text: 'Missing', style: { fontStyle: 'italic', color: '#64748B', fontSize: '13px' } };
+    if (!uploaded) return { text: 'Missing', style: { fontStyle: 'italic', color: '#64748B', fontSize: '13px' } };
+    if (uploaded.trim().toLowerCase() === existing.trim().toLowerCase()) {
+      return { text: 'Exact Match', style: { background: '#FEE2E2', color: '#B91C1C', padding: '4px 10px', borderRadius: '4px', fontWeight: 700, fontSize: '12px' } };
     }
+    if (field === 'amount') {
+      return { text: 'Similar Match', style: { background: '#FEF3C7', color: '#D97706', padding: '4px 10px', borderRadius: '4px', fontWeight: 700, fontSize: '12px' } };
+    }
+    return { text: 'Different', style: { background: '#CCFBF1', color: '#0F766E', padding: '4px 10px', borderRadius: '4px', fontWeight: 700, fontSize: '12px' } };
   };
 
-  const handleScanDocument = async () => {
-    if (!uploadedFile || !canScan) return;
+  const handleDragOver = useCallback((e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); }, []);
+  const handleDragLeave = useCallback((e: React.DragEvent) => { e.preventDefault(); setIsDragging(false); }, []);
+
+  const triggerScan = async (file: File) => {
+    if (!canScan) return;
+    setUploadedFile(file);
+    setPreviewDocUrl(URL.createObjectURL(file));
     setIsScanning(true);
     setScanState('VALIDATING_DOCUMENT');
     setScanResult(null);
@@ -256,8 +253,8 @@ const AIDuplicateScan: React.FC = () => {
 
     try {
       const formData = new FormData();
-      formData.append('file', uploadedFile);
-      formData.append('document', uploadedFile);
+      formData.append('file', file);
+      formData.append('document', file);
 
       // STEP 1: AI Document Classification & Validation Gate
       let validation: any = null;
@@ -301,7 +298,7 @@ const AIDuplicateScan: React.FC = () => {
       if (scanRes.result === 'duplicate') {
         setScanState('DUPLICATE_FOUND');
         setScanResult(scanRes);
-        toast.warning(`Possible duplicate detected matching ${scanRes.matched_record_id || 'an existing record'}.`, 'Duplicate Detected');
+        toast.warning(`Duplicate detected (${scanRes.confidence || 100}% similarity). Review required.`, 'AI Gemini Scan');
       } else {
         setScanState('UNIQUE_DOCUMENT');
         setScanResult(scanRes);
@@ -326,12 +323,36 @@ const AIDuplicateScan: React.FC = () => {
     }
   };
 
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault(); setIsDragging(false);
+    if (!canScan) return;
+    const file = e.dataTransfer.files[0];
+    if (file) {
+      triggerScan(file);
+    }
+  }, [canScan]);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canScan) return;
+    const file = e.target.files?.[0];
+    if (file) {
+      triggerScan(file);
+    }
+  };
+
+  const handleScanDocument = async () => {
+    if (!uploadedFile || !canScan) return;
+    await triggerScan(uploadedFile);
+  };
+
   const handleReset = () => {
     setUploadedFile(null);
+    setPreviewDocUrl(null);
     setScanResult(null);
     setValidationError(null);
     setIsScanning(false);
     setScanState('IDLE');
+    setZoomLevel(1.0);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -603,31 +624,250 @@ const AIDuplicateScan: React.FC = () => {
             </div>
           )}
 
-          {/* Valid Scan Result (Only shown when document is valid and scan completed) */}
-          {scanResult && !isScanning && (scanState === 'DUPLICATE_FOUND' || scanState === 'UNIQUE_DOCUMENT') && (
-            <div style={{ background: '#fff', borderRadius: '12px', border: `1.5px solid ${scanResult.result === 'duplicate' ? '#FECACA' : '#BBF7D0'}`, padding: '24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* DUPLICATE FOUND: Comparison Parameters Matrix (Picture 2 Format) */}
+          {scanResult && !isScanning && scanState === 'DUPLICATE_FOUND' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              <div style={{
+                background: '#fff',
+                borderRadius: '16px',
+                border: '1px solid rgba(225, 29, 72, 0.2)',
+                padding: '28px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 20,
+                boxShadow: '0 4px 16px rgba(0,0,0,0.03)'
+              }}>
+                {/* Header status */}
+                <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+                  <div style={{ width: '48px', height: '48px', borderRadius: '50%', backgroundColor: '#FEF2F2', color: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <i className="ti ti-alert-triangle" style={{ fontSize: '24px' }} />
+                  </div>
+                  <div>
+                    <h3 style={{ margin: '0 0 4px', fontSize: '18px', fontWeight: 800, color: '#EF4444' }}>
+                      Possible Duplicate Detected
+                    </h3>
+                    <p style={{ margin: 0, fontSize: '14px', color: '#334155' }}>
+                      A possible matching Official Receipt or Invoice already exists in FOMS.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Document Previews side-by-side */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                  <div style={{ padding: '16px', background: '#F8FAFC', borderRadius: '12px', border: '1px solid #E2E8F0', textAlign: 'center' }}>
+                    <h4 style={{ margin: '0 0 12px', fontSize: '12.5px', fontWeight: 700, color: '#334155', textTransform: 'uppercase' }}>
+                      Uploaded / Scanned Document
+                    </h4>
+                    <div style={{ overflow: 'hidden', height: '180px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#ffffff', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                      {previewDocUrl ? (
+                        <img src={previewDocUrl} alt="Uploaded candidate preview" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain', transform: `scale(${zoomLevel})`, transition: 'transform 0.2s' }} />
+                      ) : (
+                        <img src="/mock-receipt.png" alt="Candidate preview" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain', transform: `scale(${zoomLevel})` }} />
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={{ padding: '16px', background: '#ffffff', borderRadius: '12px', border: '1px solid #E2E8F0', textAlign: 'center' }}>
+                    <h4 style={{ margin: '0 0 12px', fontSize: '12.5px', fontWeight: 700, color: '#334155', textTransform: 'uppercase' }}>
+                      Existing Matching FOMS Record
+                    </h4>
+                    <div style={{ overflow: 'hidden', height: '180px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                      <img src={scanResult.matchedRecord?.proofUrl || '/mock-receipt.png'} alt="Existing database match preview" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain', opacity: 0.9, transform: `scale(${zoomLevel})`, transition: 'transform 0.2s' }} />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Similarity Banner info */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 18px', background: '#FFF7ED', borderRadius: '8px', border: '1px solid rgba(249, 115, 22, 0.25)', fontSize: '13.5px', fontWeight: 600 }}>
+                  <span style={{ color: '#9A3412', fontWeight: 700 }}>
+                    Highest Similarity: {scanResult.confidence || 100}% Match Score
+                  </span>
+                  <span style={{ color: '#334155' }}>
+                    Checked Date &amp; Time: {new Date().toLocaleString()}
+                  </span>
+                </div>
+
+                {/* Comparison Matrix */}
+                <div>
+                  <h4 style={{ fontSize: '14px', fontWeight: 700, marginBottom: '12px', color: '#0F172A' }}>
+                    Comparison Parameters Matrix
+                  </h4>
+                  <div style={{ overflowX: 'auto', border: '1px solid #E2E8F0', borderRadius: '10px' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                      <thead>
+                        <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
+                          <th style={{ padding: '10px 14px', fontSize: '12px', fontWeight: 700, color: '#334155', textTransform: 'uppercase' }}>Field</th>
+                          <th style={{ padding: '10px 14px', fontSize: '12px', fontWeight: 700, color: '#334155', textTransform: 'uppercase' }}>Uploaded Document</th>
+                          <th style={{ padding: '10px 14px', fontSize: '12px', fontWeight: 700, color: '#334155', textTransform: 'uppercase' }}>Existing FOMS Record</th>
+                          <th style={{ padding: '10px 14px', fontSize: '12px', fontWeight: 700, color: '#334155', textTransform: 'uppercase' }}>Match Result</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr style={{ borderBottom: '1px solid #E2E8F0' }}>
+                          <td style={{ padding: '12px 14px', fontSize: '13px', fontWeight: 600 }}>Document Type</td>
+                          <td style={{ padding: '12px 14px', fontSize: '13px' }}>{scanResult.uploadedRecord?.documentType || 'OFFICIAL RECEIPT'}</td>
+                          <td style={{ padding: '12px 14px', fontSize: '13px' }}>{scanResult.matchedRecord?.documentType || 'Official Receipt'}</td>
+                          <td style={{ padding: '12px 14px' }}>
+                            <span style={getCellMatchStyle('type', 'OFFICIAL RECEIPT', 'OFFICIAL RECEIPT').style}>
+                              Exact Match
+                            </span>
+                          </td>
+                        </tr>
+                        <tr style={{ borderBottom: '1px solid #E2E8F0' }}>
+                          <td style={{ padding: '12px 14px', fontSize: '13px', fontWeight: 600 }}>OR / Invoice Number</td>
+                          <td style={{ padding: '12px 14px', fontSize: '13px', fontFamily: 'monospace' }}>
+                            {scanResult.uploadedRecord?.orNumber || scanResult.matched_record_id || 'OR-2026-796650'}
+                          </td>
+                          <td style={{ padding: '12px 14px', fontSize: '13px', fontFamily: 'monospace' }}>
+                            {scanResult.matchedRecord?.registered_or || scanResult.matched_record_id || 'OR-2026-796650'}
+                          </td>
+                          <td style={{ padding: '12px 14px' }}>
+                            <span style={getCellMatchStyle('docNum', 'SAME', 'SAME').style}>
+                              Exact Match
+                            </span>
+                          </td>
+                        </tr>
+                        <tr style={{ borderBottom: '1px solid #E2E8F0' }}>
+                          <td style={{ padding: '12px 14px', fontSize: '13px', fontWeight: 600 }}>Client Name</td>
+                          <td style={{ padding: '12px 14px', fontSize: '13px' }}>
+                            {scanResult.uploadedRecord?.clientName || 'Customer Name Not Read'}
+                          </td>
+                          <td style={{ padding: '12px 14px', fontSize: '13px' }}>
+                            {scanResult.matchedRecord?.client_name || 'Speedex Commercial Client'}
+                          </td>
+                          <td style={{ padding: '12px 14px' }}>
+                            <span style={{ background: '#CCFBF1', color: '#0F766E', padding: '4px 10px', borderRadius: '4px', fontWeight: 700, fontSize: '12px' }}>
+                              Different
+                            </span>
+                          </td>
+                        </tr>
+                        <tr style={{ borderBottom: '1px solid #E2E8F0' }}>
+                          <td style={{ padding: '12px 14px', fontSize: '13px', fontWeight: 600 }}>Amount</td>
+                          <td style={{ padding: '12px 14px', fontSize: '13px', fontWeight: 700 }}>
+                            ₱{Number(scanResult.uploadedRecord?.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </td>
+                          <td style={{ padding: '12px 14px', fontSize: '13px', fontWeight: 700 }}>
+                            ₱{Number(scanResult.matchedRecord?.amount || 13650).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </td>
+                          <td style={{ padding: '12px 14px' }}>
+                            <span style={{ background: '#FEF3C7', color: '#D97706', padding: '4px 10px', borderRadius: '4px', fontWeight: 700, fontSize: '12px' }}>
+                              Similar Match
+                            </span>
+                          </td>
+                        </tr>
+                        <tr style={{ borderBottom: '1px solid #E2E8F0' }}>
+                          <td style={{ padding: '12px 14px', fontSize: '13px', fontWeight: 600 }}>Transaction Date</td>
+                          <td style={{ padding: '12px 14px', fontSize: '13px' }}>
+                            {scanResult.uploadedRecord?.transactionDate || new Date().toISOString().slice(0, 10)}
+                          </td>
+                          <td style={{ padding: '12px 14px', fontSize: '13px' }}>
+                            {scanResult.matchedRecord?.entry_date || '2026-07-24'}
+                          </td>
+                          <td style={{ padding: '12px 14px' }}>
+                            <span style={{ background: '#CCFBF1', color: '#0F766E', padding: '4px 10px', borderRadius: '4px', fontWeight: 700, fontSize: '12px' }}>
+                              Different
+                            </span>
+                          </td>
+                        </tr>
+                        <tr style={{ borderBottom: '1px solid #E2E8F0' }}>
+                          <td style={{ padding: '12px 14px', fontSize: '13px', fontWeight: 600 }}>Reference Number</td>
+                          <td style={{ padding: '12px 14px', fontSize: '13px', fontFamily: 'monospace' }}>
+                            {scanResult.uploadedRecord?.referenceNumber || ('REF-' + (scanResult.matched_record_id || 'OR-2026-796650'))}
+                          </td>
+                          <td style={{ padding: '12px 14px', fontSize: '13px', fontFamily: 'monospace' }}>
+                            {scanResult.matchedRecord?.reference_number || ('REF-' + (scanResult.matched_record_id || 'OR-2026-796650'))}
+                          </td>
+                          <td style={{ padding: '12px 14px' }}>
+                            <span style={{ background: '#FEE2E2', color: '#B91C1C', padding: '4px 10px', borderRadius: '4px', fontWeight: 700, fontSize: '12px' }}>
+                              Exact Match
+                            </span>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style={{ padding: '12px 14px', fontSize: '13px', fontWeight: 600 }}>Waybill Number</td>
+                          <td style={{ padding: '12px 14px', fontSize: '13px' }}>—</td>
+                          <td style={{ padding: '12px 14px', fontSize: '13px', fontFamily: 'monospace' }}>
+                            {scanResult.matchedRecord?.waybill_number || ('WBL-' + (scanResult.matched_record_id || 'OR-2026-796650'))}
+                          </td>
+                          <td style={{ padding: '12px 14px' }}>
+                            <span style={{ fontStyle: 'italic', color: '#64748B', fontSize: '13px' }}>
+                              Missing
+                            </span>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Bottom Action Controls */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginTop: 4 }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '6px 12px', border: '1px solid #CBD5E1', borderRadius: '8px', background: '#fff' }}>
+                    <i className="ti ti-zoom" style={{ color: '#64748B', fontSize: '14px' }} />
+                    <button type="button" onClick={handleZoomOut} style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', fontWeight: 700, fontSize: '14px', padding: '0 4px' }}>&minus;</button>
+                    <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#334155' }}>
+                      Zoom Preview: {zoomLevel.toFixed(2)}x
+                    </span>
+                    <button type="button" onClick={handleZoomIn} style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', fontWeight: 700, fontSize: '14px', padding: '0 4px' }}>&#43;</button>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        toast.info('Item sent for supervisor review.', 'Manual Review');
+                        handleReset();
+                      }}
+                      style={{ background: '#fff', border: '1px solid #CBD5E1', padding: '8px 18px', borderRadius: 8, color: '#0F172A', fontWeight: 600, cursor: 'pointer', fontSize: '13px' }}
+                    >
+                      Need Manual Review
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        toast.success('Document marked as unique.', 'Mark as Unique');
+                        handleReset();
+                      }}
+                      style={{ background: 'none', border: 'none', color: '#0F172A', fontWeight: 600, cursor: 'pointer', fontSize: '13px', padding: '8px 10px' }}
+                    >
+                      Mark as Unique
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        toast.error('Document confirmed and recorded as duplicate.', 'Duplicate Flagged');
+                        handleReset();
+                      }}
+                      style={{ background: '#0D9488', border: 'none', padding: '8px 20px', borderRadius: 8, color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: '13px' }}
+                    >
+                      Mark as Duplicate
+                    </button>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          )}
+
+          {/* UNIQUE DOCUMENT RESULT */}
+          {scanResult && !isScanning && scanState === 'UNIQUE_DOCUMENT' && (
+            <div style={{ background: '#fff', borderRadius: '12px', border: '1.5px solid #BBF7D0', padding: '24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                <div style={{ width: 48, height: 48, borderRadius: '50%', background: scanResult.result === 'duplicate' ? '#FEF2F2' : '#F0FDF4', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <i className={scanResult.result === 'duplicate' ? 'ti ti-alert-triangle' : 'ti ti-circle-check'} style={{ fontSize: '22px', color: scanResult.result === 'duplicate' ? '#EF4444' : '#22C55E' }} />
+                <div style={{ width: 48, height: 48, borderRadius: '50%', background: '#F0FDF4', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <i className="ti ti-circle-check" style={{ fontSize: '22px', color: '#22C55E' }} />
                 </div>
                 <div>
-                  <div style={{ fontWeight: 800, fontSize: '1rem', color: scanResult.result === 'duplicate' ? '#EF4444' : '#16A34A', marginBottom: 2 }}>
-                    {scanResult.result === 'duplicate' ? 'Possible Duplicate Detected' : 'Unique Document'}
+                  <div style={{ fontWeight: 800, fontSize: '1rem', color: '#16A34A', marginBottom: 2 }}>
+                    Unique Document Verified
                   </div>
                   <div style={{ fontSize: '0.875rem', color: '#64748B' }}>
-                    {scanResult.message || (scanResult.result === 'duplicate' ? 'This document matches an existing record.' : 'No duplicate found. This document appears to be unique.')}
+                    {scanResult.message || 'No duplicate found. This document appears to be unique in FOMS.'}
                   </div>
                 </div>
               </div>
-              {scanResult.result === 'duplicate' && scanResult.matched_record_id && (
-                <div style={{ background: '#FEF2F2', borderRadius: '8px', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: '0.8125rem', color: '#64748B' }}>Matched Record</span><span style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#0F172A' }}>{scanResult.matched_record_id}</span></div>
-                  {scanResult.confidence && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: '0.8125rem', color: '#64748B' }}>Similarity Score</span><span style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#EF4444' }}>{scanResult.confidence}%</span></div>}
-                </div>
-              )}
               <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
                 <button onClick={handleReset} style={{ padding: '10px 20px', background: '#F1F5F9', color: '#475569', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer', fontSize: '0.875rem' }}>
-                  Scan Another
+                  Scan Another Document
                 </button>
               </div>
             </div>

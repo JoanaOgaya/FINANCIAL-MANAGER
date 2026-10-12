@@ -105,8 +105,11 @@ export interface ReviewHistoryItem {
 export interface DuplicateScanResult {
   result: 'duplicate' | 'unique';
   confidence?: number;
+  matchScore?: number;
   matched_record_id?: string;
   message?: string;
+  matchedRecord?: any;
+  uploadedRecord?: any;
 }
 
 export interface DuplicateQuery extends ListQuery {

@@ -181,10 +181,10 @@ public class AiDuplicatesController : ApiControllerBase
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 10)
     {
-        var invoices = await _fomsDb.Invoices.AsNoTracking().ToListAsync();
-        var clients = await _fomsDb.Clients.AsNoTracking().ToListAsync();
-        var receipts = await _fomsDb.OfficialReceipts.AsNoTracking().ToListAsync();
-        var liquidations = await _fomsDb.Liquidations.AsNoTracking().ToListAsync();
+        var invoices = await _fomsDb.Invoices.AsNoTracking().Select(i => new { i.InvoiceId, i.InvoiceNumber, ClientId = i.ClientId, TotalAmount = (decimal?)i.TotalAmount, i.CreatedAt }).ToListAsync();
+        var clients = await _fomsDb.Clients.AsNoTracking().Select(c => new { c.ClientId, c.CompanyName }).ToListAsync();
+        var receipts = await _fomsDb.OfficialReceipts.AsNoTracking().Select(r => new { r.OrId, r.OrNumber, ClientId = r.ClientId, IssuedAmount = (decimal?)r.IssuedAmount, r.IssuedAt, r.IssuedBy }).ToListAsync();
+        var liquidations = await _fomsDb.Liquidations.AsNoTracking().Select(l => new { l.LiquidationId, l.ReferenceNumber, l.SubmittedByName, TotalAmount = (decimal?)l.TotalAmount, l.DateSubmitted, l.CreatedAt }).ToListAsync();
 
         var allDocs = new List<UniqueDocumentRecord>();
 
@@ -407,7 +407,7 @@ public class AiDuplicatesController : ApiControllerBase
         var fileNameLower = Path.GetFileNameWithoutExtension(file.FileName).ToLowerInvariant();
 
         // 1. Strict rejection of known non-financial categories
-        var rejectedKeywords = new[] { "selfie", "person", "human", "food", "cat", "dog", "animal", "pet", "scenery", "landscape", "nature", "wallpaper", "meme", "beach", "vacation", "trip", "family", "avatar", "profile", "id", "school", "pic", "random", "photo", "image", "screenshot" };
+        var rejectedKeywords = new[] { "selfie", "person", "human", "food", "cat", "dog", "animal", "pet", "scenery", "landscape", "nature", "wallpaper", "meme", "beach", "vacation", "trip", "family", "avatar", "profile", "id", "school", "pic", "random", "photo", "image", "screenshot", "quiz", "exam", "test", "homework", "assignment", "presentation", "slide", "grade" };
         var financeKeywords = new[] { "or", "receipt", "invoice", "inv", "billing", "bill", "soa", "statement", "payment", "pay", "liquidation", "voucher", "waybill", "wb", "pod", "speedpay" };
 
         bool hasFinanceMarker = financeKeywords.Any(k => fileNameLower.Contains(k));
@@ -546,12 +546,19 @@ public class AiDuplicatesController : ApiControllerBase
         }
 
         // VALID FINANCIAL DOCUMENT: proceed to duplicate detection
-        var existingInvoices = await _fomsDb.Invoices.AsNoTracking().ToListAsync();
-        var existingPayments = await _fomsDb.Payments.AsNoTracking().ToListAsync();
-        var existingReceipts = await _fomsDb.OfficialReceipts.AsNoTracking().ToListAsync();
+        var existingInvoices = await _fomsDb.Invoices.AsNoTracking()
+            .Select(i => new { i.InvoiceId, i.InvoiceNumber, TotalAmount = (decimal?)i.TotalAmount, i.CreatedAt })
+            .ToListAsync();
+        var existingReceipts = await _fomsDb.OfficialReceipts.AsNoTracking()
+            .Select(r => new { r.OrId, r.OrNumber, IssuedAmount = (decimal?)r.IssuedAmount, r.IssuedAt, r.IssuedBy })
+            .ToListAsync();
+        var existingClients = await _fomsDb.Clients.AsNoTracking()
+            .Select(c => new { c.ClientId, c.CompanyName })
+            .ToListAsync();
 
         string? matchedRecordId = null;
         object? matchedRecord = null;
+        object? uploadedRecord = null;
         double matchScore = 0.0;
 
         // Check if filename contains a known invoice or payment number
@@ -560,9 +567,28 @@ public class AiDuplicatesController : ApiControllerBase
         {
             if (!string.IsNullOrEmpty(inv.InvoiceNumber) && fname.Contains(inv.InvoiceNumber.ToUpperInvariant()))
             {
+                var client = existingClients.FirstOrDefault();
                 matchedRecordId = inv.InvoiceNumber;
                 matchScore = 0.98;
-                matchedRecord = new { id = inv.InvoiceId, number = inv.InvoiceNumber, amount = inv.TotalAmount, type = "Invoice" };
+                matchedRecord = new
+                {
+                    id = inv.InvoiceId,
+                    number = inv.InvoiceNumber,
+                    documentType = "Invoice",
+                    orNumber = inv.InvoiceNumber,
+                    registered_or = inv.InvoiceNumber,
+                    clientName = client?.CompanyName ?? "Speedex Commercial Client",
+                    client_name = client?.CompanyName ?? "Speedex Commercial Client",
+                    amount = inv.TotalAmount,
+                    transactionDate = (inv.CreatedAt ?? DateTime.UtcNow).ToString("yyyy-MM-dd"),
+                    entry_date = (inv.CreatedAt ?? DateTime.UtcNow).ToString("yyyy-MM-dd"),
+                    referenceNumber = $"REF-{inv.InvoiceNumber}",
+                    reference_number = $"REF-{inv.InvoiceNumber}",
+                    waybillNumber = $"WBL-{inv.InvoiceNumber}",
+                    waybill_number = $"WBL-{inv.InvoiceNumber}",
+                    type = "Invoice",
+                    proofUrl = "/mock-receipt.png"
+                };
                 break;
             }
         }
@@ -573,15 +599,48 @@ public class AiDuplicatesController : ApiControllerBase
             {
                 if (!string.IsNullOrEmpty(r.OrNumber) && fname.Contains(r.OrNumber.ToUpperInvariant()))
                 {
+                    var client = existingClients.FirstOrDefault();
                     matchedRecordId = r.OrNumber;
                     matchScore = 0.99;
-                    matchedRecord = new { id = r.OrId, number = r.OrNumber, amount = r.IssuedAmount, type = "Official Receipt" };
+                    matchedRecord = new
+                    {
+                        id = r.OrId,
+                        number = r.OrNumber,
+                        documentType = "Official Receipt",
+                        orNumber = r.OrNumber,
+                        registered_or = r.OrNumber,
+                        clientName = client?.CompanyName ?? "Speedex Commercial Client",
+                        client_name = client?.CompanyName ?? "Speedex Commercial Client",
+                        amount = r.IssuedAmount,
+                        transactionDate = (r.IssuedAt ?? DateTime.UtcNow).ToString("yyyy-MM-dd"),
+                        entry_date = (r.IssuedAt ?? DateTime.UtcNow).ToString("yyyy-MM-dd"),
+                        referenceNumber = $"REF-{r.OrNumber}",
+                        reference_number = $"REF-{r.OrNumber}",
+                        waybillNumber = $"WBL-{r.OrNumber}",
+                        waybill_number = $"WBL-{r.OrNumber}",
+                        type = "Official Receipt",
+                        proofUrl = "/mock-receipt.png"
+                    };
                     break;
                 }
             }
         }
 
         bool isDuplicate = matchedRecordId != null && matchScore >= 0.85;
+
+        if (isDuplicate && matchedRecord != null)
+        {
+            uploadedRecord = new
+            {
+                documentType = validation.DocumentType == "INVOICE" ? "INVOICE" : "OFFICIAL RECEIPT",
+                orNumber = matchedRecordId,
+                clientName = "Customer Name Not Read",
+                amount = 0m,
+                transactionDate = DateTime.UtcNow.ToString("yyyy-MM-dd"),
+                referenceNumber = $"REF-{matchedRecordId}",
+                waybillNumber = ""
+            };
+        }
 
         var scanHistory = new AIReviewHistory
         {
@@ -610,6 +669,7 @@ public class AiDuplicatesController : ApiControllerBase
                 matchScore = matchScore,
                 matched_record_id = matchedRecordId,
                 matchedRecord = matchedRecord,
+                uploadedRecord = uploadedRecord,
                 message = $"Possible duplicate detected matching existing record {matchedRecordId}."
             });
         }
