@@ -51,6 +51,33 @@ services:
     networks:
       - foms-network
 
+  foms-api:
+    build:
+      context: ./foms-backend
+      dockerfile: Dockerfile
+    container_name: foms_api
+    ports:
+      - "8080:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:8080
+      - ConnectionStrings__FomsSqlServer=Server=host.docker.internal\\SQLEXPRESS;Database=FOMS_DB;Trusted_Connection=True;TrustServerCertificate=True;
+      - ConnectionStrings__DefaultConnection=Server=host.docker.internal\\SQLEXPRESS;Database=FOMS_DB;Trusted_Connection=True;TrustServerCertificate=True;
+      - JwtSettings__Secret=${JWT_SECRET:-FOMS_Capstone_JWT_SecureKey_2026!!}
+      - JwtSettings__Issuer=FOMS.Api
+      - JwtSettings__Audience=FOMS.Api
+      - PayMongo__SecretKey=${PAYMONGO_SECRET_KEY:-sk_test_fyNzfY2nbwdhfgUcoMmWoZJq}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    networks:
+      - foms-network
+    restart: unless-stopped
+
 volumes:
   postgres-data:
   mongodb-data:
