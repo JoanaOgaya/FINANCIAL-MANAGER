@@ -1,0 +1,274 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Security.Claims;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using FOMS.Domain.Entities.SqlServer;
+using FOMS.Infrastructure.Persistence;
+
+namespace FOMS.Api.Controllers;
+
+[Authorize]
+[ApiController]
+[Route("api/speedpay")]
+[Route("speedpay")]
+public class SpeedPaySharedController : ControllerBase
+{
+    private readonly FomsDbContext _fomsDb;
+
+    public SpeedPaySharedController(FomsDbContext fomsDb)
+    {
+        _fomsDb = fomsDb;
+    }
+
+    private string CurrentRole() =>
+        User.FindFirst(ClaimTypes.Role)?.Value
+        ?? User.FindFirst("role")?.Value
+        ?? "Finance";
+
+    [HttpGet("payments/pending-validation")]
+    public async Task<IActionResult> GetPendingValidation()
+    {
+        var payments = await _fomsDb.Payments.AsNoTracking()
+            .Where(p => (p.PaymentMethod == "PayMongo" || p.PaymentMethod == "SpeedPay" || p.PaymentMethod == "GCash" || p.PaymentMethod == "Maya")
+                     && (p.PaymentStatus == "Pending Finance Validation" || p.PaymentStatus == "Pending Validation" || p.PaymentStatus == "Pending"))
+            .ToListAsync();
+
+        var invoices = await _fomsDb.Invoices.AsNoTracking().ToListAsync();
+        var clients = await _fomsDb.Clients.AsNoTracking().ToListAsync();
+
+        var data = payments.Select(p =>
+        {
+            var inv = invoices.FirstOrDefault(i => i.InvoiceId == p.InvoiceId);
+            var cl = clients.FirstOrDefault(c => c.ClientId == p.ClientId);
+            return new
+            {
+                paymentId = p.PaymentId,
+                invoiceId = p.InvoiceId,
+                invoiceNumber = inv?.InvoiceNumber ?? $"INV-{p.InvoiceId}",
+                clientName = cl?.CompanyName ?? "Unknown",
+                amount = p.Amount,
+                paymentMethod = p.PaymentMethod ?? "PayMongo",
+                speedpayReference = p.ReferenceNumber ?? $"SP-{p.PaymentId}",
+                paymongoReference = p.ReferenceNumber ?? $"PM-{p.PaymentId}",
+                paymentStatus = "Pending Finance Validation",
+                submittedAt = (p.SubmittedAt ?? DateTime.UtcNow).ToString("yyyy-MM-ddTHH:mm:ss")
+            };
+        }).ToList();
+
+        return Ok(new
+        {
+            success = true,
+            count = data.Count,
+            data
+        });
+    }
+
+    [HttpPost("payments/{paymentId}/validate")]
+    public async Task<IActionResult> ValidatePayment(int paymentId)
+    {
+        var payment = await _fomsDb.Payments.FindAsync(paymentId);
+        if (payment == null)
+            return NotFound(new { success = false, message = "Payment not found." });
+
+        payment.PaymentStatus = "Validated";
+        payment.ValidatedAt = DateTime.UtcNow;
+        payment.ValidatedBy = 2;
+
+        // Update Invoice
+        var invoice = await _fomsDb.Invoices.FindAsync(payment.InvoiceId);
+        if (invoice != null)
+        {
+            invoice.PaidAmount = (invoice.PaidAmount ?? 0m) + payment.Amount;
+            invoice.OutstandingBalance = Math.Max(0m, invoice.TotalAmount - (invoice.PaidAmount ?? 0m));
+            if (invoice.OutstandingBalance <= 0m)
+            {
+                invoice.InvoiceStatus = "Paid";
+                invoice.ValidationStatus = "Validated";
+
+                // Generate Official Receipt if fully paid
+                var orSeq = await _fomsDb.OfficialReceipts.CountAsync() + 1;
+                var orNum = $"OR-2026-{orSeq:D4}";
+                _fomsDb.OfficialReceipts.Add(new FomsOfficialReceipt
+                {
+                    OrNumber = orNum,
+                    PaymentId = paymentId,
+                    InvoiceId = invoice.InvoiceId,
+                    ClientId = invoice.ClientId,
+                    IssuedAmount = invoice.TotalAmount,
+                    IssuedBy = "Head Accountant",
+                    IssuedAt = DateTime.UtcNow,
+                    Status = "Issued"
+                });
+            }
+            invoice.UpdatedAt = DateTime.UtcNow;
+        }
+
+        // Update AR
+        var ar = await _fomsDb.AccountsReceivable.FirstOrDefaultAsync(a => a.InvoiceId == payment.InvoiceId);
+        if (ar != null)
+        {
+            ar.PaidAmount = (ar.PaidAmount ?? 0m) + payment.Amount;
+            ar.OutstandingBalance = Math.Max(0m, ar.InvoiceAmount - (ar.PaidAmount ?? 0m));
+            if (ar.OutstandingBalance <= 0m)
+            {
+                ar.ArStatus = "Settled";
+            }
+        }
+
+        // PaymentHistory
+        _fomsDb.PaymentHistory.Add(new PaymentHistory
+        {
+            PaymentId = paymentId,
+            InvoiceId = payment.InvoiceId,
+            Status = "Validated",
+            Action = "VALIDATE_SPEEDPAY",
+            Remarks = "SpeedPay transaction validated by finance.",
+            PerformedBy = 2,
+            PerformedRole = CurrentRole(),
+            CreatedAt = DateTime.UtcNow
+        });
+
+        // AuditLog
+        _fomsDb.AuditLogs.Add(new AuditLog
+        {
+            user_id = 2,
+            role = CurrentRole(),
+            action = "VALIDATE_SPEEDPAY",
+            module = "SpeedPay Validation",
+            affected_record_type = "Payment",
+            affected_record_id = paymentId,
+            before_value = "Pending Finance Validation",
+            after_value = "Validated",
+            remarks = $"Validated SpeedPay payment #{paymentId} of ₱{payment.Amount:N2}.",
+            created_at = DateTime.UtcNow
+        });
+
+        // Notification
+        _fomsDb.Notifications.Add(new Notification
+        {
+            RecipientRole = "Accountant",
+            Title = "SpeedPay Payment Validated",
+            Message = $"SpeedPay payment #{paymentId} for Invoice #{payment.InvoiceId} has been validated.",
+            Type = "Payment_Validated",
+            RelatedRecordType = "Payment",
+            RelatedRecordId = paymentId,
+            IsRead = false,
+            CreatedAt = DateTime.UtcNow
+        });
+
+        await _fomsDb.SaveChangesAsync();
+        return Ok(new { success = true, message = "SpeedPay payment validated successfully." });
+    }
+
+    [HttpPost("payments/{paymentId}/reject")]
+    public async Task<IActionResult> RejectPayment(int paymentId, [FromBody] dynamic? body)
+    {
+        var payment = await _fomsDb.Payments.FindAsync(paymentId);
+        if (payment == null)
+            return NotFound(new { success = false, message = "Payment not found." });
+
+        string reason = body?.reason?.ToString() ?? "Payment details do not match bank gateway settlement.";
+        payment.PaymentStatus = "Rejected";
+        payment.RejectionReason = reason;
+        payment.RejectedAt = DateTime.UtcNow;
+        payment.RejectedBy = 2;
+
+        _fomsDb.PaymentHistory.Add(new PaymentHistory
+        {
+            PaymentId = paymentId,
+            InvoiceId = payment.InvoiceId,
+            Status = "Rejected",
+            Action = "REJECT_SPEEDPAY",
+            Remarks = reason,
+            PerformedBy = 2,
+            PerformedRole = CurrentRole(),
+            CreatedAt = DateTime.UtcNow
+        });
+
+        _fomsDb.AuditLogs.Add(new AuditLog
+        {
+            user_id = 2,
+            role = CurrentRole(),
+            action = "REJECT_SPEEDPAY",
+            module = "SpeedPay Validation",
+            affected_record_type = "Payment",
+            affected_record_id = paymentId,
+            before_value = "Pending Finance Validation",
+            after_value = "Rejected",
+            remarks = reason,
+            created_at = DateTime.UtcNow
+        });
+
+        _fomsDb.Notifications.Add(new Notification
+        {
+            RecipientRole = "Accountant",
+            Title = "SpeedPay Payment Rejected",
+            Message = $"SpeedPay payment #{paymentId} rejected: {reason}",
+            Type = "Payment_Rejected",
+            RelatedRecordType = "Payment",
+            RelatedRecordId = paymentId,
+            IsRead = false,
+            CreatedAt = DateTime.UtcNow
+        });
+
+        await _fomsDb.SaveChangesAsync();
+        return Ok(new { success = true, message = "SpeedPay payment rejected." });
+    }
+
+    [HttpPost("payments/{paymentId}/return")]
+    public async Task<IActionResult> ReturnPayment(int paymentId, [FromBody] dynamic? body)
+    {
+        var payment = await _fomsDb.Payments.FindAsync(paymentId);
+        if (payment == null)
+            return NotFound(new { success = false, message = "Payment not found." });
+
+        string remarks = body?.remarks?.ToString() ?? "SpeedPay transaction returned for correction.";
+        payment.PaymentStatus = "Returned";
+        payment.Remarks = remarks;
+
+        _fomsDb.PaymentHistory.Add(new PaymentHistory
+        {
+            PaymentId = paymentId,
+            InvoiceId = payment.InvoiceId,
+            Status = "Returned",
+            Action = "RETURN_SPEEDPAY",
+            Remarks = remarks,
+            PerformedBy = 2,
+            PerformedRole = CurrentRole(),
+            CreatedAt = DateTime.UtcNow
+        });
+
+        _fomsDb.AuditLogs.Add(new AuditLog
+        {
+            user_id = 2,
+            role = CurrentRole(),
+            action = "RETURN_SPEEDPAY",
+            module = "SpeedPay Validation",
+            affected_record_type = "Payment",
+            affected_record_id = paymentId,
+            before_value = "Pending Finance Validation",
+            after_value = "Returned",
+            remarks = remarks,
+            created_at = DateTime.UtcNow
+        });
+
+        _fomsDb.Notifications.Add(new Notification
+        {
+            RecipientRole = "Accountant",
+            Title = "SpeedPay Payment Returned",
+            Message = $"SpeedPay payment #{paymentId} returned for correction: {remarks}",
+            Type = "Payment_Returned",
+            RelatedRecordType = "Payment",
+            RelatedRecordId = paymentId,
+            IsRead = false,
+            CreatedAt = DateTime.UtcNow
+        });
+
+        await _fomsDb.SaveChangesAsync();
+        return Ok(new { success = true, message = "SpeedPay payment returned for correction." });
+    }
+}

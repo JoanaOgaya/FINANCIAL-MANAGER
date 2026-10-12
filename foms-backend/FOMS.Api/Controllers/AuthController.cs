@@ -45,9 +45,15 @@ public class AuthController : ControllerBase
         {
             var result = await _authService.LoginAsync(identifier, request.Password);
 
+            int parsedUserId = 1;
+            if (int.TryParse(result.User.Id?.Replace("EMP-", "").TrimStart('0'), out var pId))
+            {
+                parsedUserId = pId;
+            }
+
             var userProfile = new
             {
-                userId = 1,
+                userId = parsedUserId,
                 employeeNumber = result.User.EmployeeNumber ?? result.User.Id,
                 fullName = result.User.FullName,
                 role = result.User.Role

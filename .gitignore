@@ -25,11 +25,19 @@ ENV/
 pgdata/
 mongodata/
 
-# Local configuration files
+# Local configuration and secret files
 .env
 .env.local
 .env.*
+.env.development
+.env.production
 !.env.example
+appsettings.Development.json
+appsettings.Production.json
+secrets.json
+*.key
+*.pem
+*.pfx
 
 # OS files
 .DS_Store

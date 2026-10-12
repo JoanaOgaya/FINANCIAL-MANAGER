@@ -321,7 +321,7 @@ public class SpeedPaySubmissionsController : ControllerBase
                 ReferenceNumber = submission.ReferenceNumber,
                 ProofImageUrl = submission.ProofFileUrl,
                 Remarks = request.Remarks ?? "Manual submission status updated.",
-                PaymentStatus = request.Status,
+                PaymentStatus = request.Status ?? "Under Review",
                 SubmittedAt = submission.SubmittedAt,
                 PaymentDate = DateTime.UtcNow.ToString("yyyy-MM-dd"),
                 DateRecorded = DateTime.UtcNow.ToString("yyyy-MM-dd")
@@ -330,7 +330,7 @@ public class SpeedPaySubmissionsController : ControllerBase
         }
         else
         {
-            payment.PaymentStatus = request.Status;
+            payment.PaymentStatus = request.Status ?? "Under Review";
             if (request.Status == "Rejected") {
                 payment.RejectionReason = request.Remarks ?? "Manual submission rejected.";
                 payment.RejectedAt = DateTime.UtcNow;

@@ -90,6 +90,105 @@ public class DatabaseHealthController : ControllerBase
         }
     }
 
+    [HttpGet("head-accountant")]
+    public async Task<IActionResult> CheckHeadAccountantAccess()
+    {
+        try
+        {
+            var user = await _dbContext.Users
+                .AsNoTracking()
+                .FirstOrDefaultAsync(u => u.EmployeeNumber == "EMP-002");
+
+            var role = user != null ? await _dbContext.Roles.FindAsync(user.RoleId) : null;
+            var isHa = (role != null && (role.RoleName == "Head Accountant" || role.RoleName == "HeadAccountant"))
+                       || (user != null && user.RoleId == 2);
+
+            return Ok(new
+            {
+                success = true,
+                employeeNumber = "EMP-002",
+                role = role?.RoleName ?? "Head Accountant",
+                isActive = user?.IsActive ?? true,
+                canAccessHeadAccountant = isHa && (user?.IsActive ?? true),
+                database = "FOMS_DB"
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new
+            {
+                success = false,
+                message = ex.Message
+            });
+        }
+    }
+
+    [HttpGet("accountant")]
+    public async Task<IActionResult> CheckAccountantAccess()
+    {
+        try
+        {
+            var user = await _dbContext.Users
+                .AsNoTracking()
+                .FirstOrDefaultAsync(u => u.EmployeeNumber == "EMP-003");
+
+            var role = user != null ? await _dbContext.Roles.FindAsync(user.RoleId) : null;
+            var isAcc = (role != null && role.RoleName == "Accountant")
+                        || (user != null && user.RoleId == 3);
+
+            return Ok(new
+            {
+                success = true,
+                employeeNumber = "EMP-003",
+                role = role?.RoleName ?? "Accountant",
+                isActive = user?.IsActive ?? true,
+                canAccessAccountant = isAcc && (user?.IsActive ?? true),
+                database = "FOMS_DB"
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new
+            {
+                success = false,
+                message = ex.Message
+            });
+        }
+    }
+
+    [HttpGet("assistant-finance-manager")]
+    public async Task<IActionResult> CheckAssistantFinanceManagerAccess()
+    {
+        try
+        {
+            var user = await _dbContext.Users
+                .AsNoTracking()
+                .FirstOrDefaultAsync(u => u.EmployeeNumber == "EMP-004");
+
+            var role = user != null ? await _dbContext.Roles.FindAsync(user.RoleId) : null;
+            var isAfm = (role != null && (role.RoleName == "Assistant of Financial Manager" || role.RoleName == "Assistant Finance Manager"))
+                        || (user != null && user.RoleId == 4);
+
+            return Ok(new
+            {
+                success = true,
+                employeeNumber = "EMP-004",
+                role = role?.RoleName ?? "Assistant of Financial Manager",
+                isActive = user?.IsActive ?? true,
+                canAccessAssistantFinanceManager = isAfm && (user?.IsActive ?? true),
+                database = "FOMS_DB"
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new
+            {
+                success = false,
+                message = ex.Message
+            });
+        }
+    }
+
     [HttpGet("no-mock-data")]
     public IActionResult CheckNoMockData()
     {

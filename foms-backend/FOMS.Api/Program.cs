@@ -279,14 +279,22 @@ using (var scope = app.Services.CreateScope())
             logger.LogInformation("Database migration skipped (tables exist): {Message}", ex.Message);
         }
 
-        try
+        bool enableSeedFallback = string.Equals(Environment.GetEnvironmentVariable("ENABLE_SEED_FALLBACK"), "true", StringComparison.OrdinalIgnoreCase);
+        if (enableSeedFallback)
         {
-            await ApplicationDbContextSeed.SeedSampleDataAsync(context);
-            logger.LogInformation("Database seeded successfully.");
+            try
+            {
+                await ApplicationDbContextSeed.SeedSampleDataAsync(context);
+                logger.LogInformation("Database seeded successfully.");
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning("Database seed warning: {Message}", ex.Message);
+            }
         }
-        catch (Exception ex)
+        else
         {
-            logger.LogWarning("Database seed warning: {Message}", ex.Message);
+            logger.LogInformation("Sample seeding skipped: live database records active (ENABLE_SEED_FALLBACK is false).");
         }
     }
     catch (Exception ex)
