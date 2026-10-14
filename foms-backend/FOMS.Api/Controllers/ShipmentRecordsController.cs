@@ -69,7 +69,7 @@ public class ShipmentRecordsController : ApiControllerBase
 
         var items = waybills.Select(w =>
         {
-            var c = clients.FirstOrDefault(cl => cl.ClientId == w.ClientId);
+            var c = clients.FirstOrDefault(cl => cl.ClientId == w.ClientId || cl.Id == $"CA-00{w.ClientId}");
             string clientCode = c?.ClientCode ?? (w.ClientId == 1 ? "CA-001" : w.ClientId == 2 ? "CA-002" : w.ClientId.ToString());
             return new
             {
@@ -78,7 +78,7 @@ public class ShipmentRecordsController : ApiControllerBase
                 trackingNumber = w.WaybillNumber,
                 clientId = clientCode,
                 clientCode = clientCode,
-                clientName = c?.CompanyName ?? (clientCode == "CA-001" ? "Lazada Philippines" : clientCode == "CA-002" ? "Shopee Philippines" : $"Client {w.ClientId}"),
+                clientName = c?.Name ?? c?.CompanyName ?? (clientCode == "CA-001" ? "Lazada Philippines" : clientCode == "CA-002" ? "Shopee Philippines" : $"Client {w.ClientId}"),
                 origin = w.Origin ?? "Manila",
                 destination = w.Destination ?? "Cebu",
                 deliveryArea = w.DeliveryArea ?? "NCR",

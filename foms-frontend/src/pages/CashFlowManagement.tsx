@@ -210,10 +210,6 @@ export default function CashFlowManagement() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       {/* Header and Summary */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 700, color: '#0F172A' }}>Cash Flow Management</h1>
-          <p style={{ margin: '4px 0 0 0', fontSize: '0.875rem', color: '#64748B' }}>Monitor all real-time cash inflows and outflows</p>
-        </div>
         <div style={{ display: 'flex', gap: '12px' }}>
           {isAccountant && (
             <Button

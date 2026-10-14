@@ -25,6 +25,7 @@ export const FlaggedDuplicates: React.FC = () => {
   const { toast } = useToast();
 
   const isHeadAccountant = user?.role === ROLES.HEAD_ACCOUNTANT;
+  const isFinancialManager = user?.role === ROLES.FINANCIAL_MANAGER;
   const initialStatus = isHeadAccountant ? 'PENDING_REVIEW' : '';
 
   const {
@@ -243,18 +244,20 @@ export const FlaggedDuplicates: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <PageHeader
-        title={isHeadAccountant ? 'Duplicate Review Queue' : 'Flagged Duplicates'}
-        subtitle={
-          isHeadAccountant
-            ? 'Level 2 Review Queue: Verify and approve or return duplicate decisions made by Accountants.'
-            : scope === 'liquidation'
-            ? 'Level 1: Decide on flagged duplicate liquidation expenses and vouchers.'
-            : scope === 'own'
-            ? 'Level 1: Review AI-flagged duplicate documents and mark as Duplicate or Not Duplicate.'
-            : 'Review, decide, and approve AI-flagged duplicate documents across accounts.'
-        }
-      />
+      {!isFinancialManager && (
+        <PageHeader
+          title={isHeadAccountant ? 'Duplicate Review Queue' : 'Flagged Duplicates'}
+          subtitle={
+            isHeadAccountant
+              ? 'Level 2 Review Queue: Verify and approve or return duplicate decisions made by Accountants.'
+              : scope === 'liquidation'
+              ? 'Level 1: Decide on flagged duplicate liquidation expenses and vouchers.'
+              : scope === 'own'
+              ? 'Level 1: Review AI-flagged duplicate documents and mark as Duplicate or Not Duplicate.'
+              : 'Review, decide, and approve AI-flagged duplicate documents across accounts.'
+          }
+        />
+      )}
 
       {scope === 'liquidation' && (
         <div

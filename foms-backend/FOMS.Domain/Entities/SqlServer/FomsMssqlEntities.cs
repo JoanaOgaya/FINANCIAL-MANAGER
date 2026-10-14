@@ -54,43 +54,49 @@ public class User
 public class Client
 {
     [Key]
-    [Column("client_id")]
-    public int ClientId { get; set; }
+    [Column("Id")]
+    public string Id { get; set; } = string.Empty;
 
-    [Column("dms_client_id")]
+    [Column("client_id")]
+    public int? ClientId { get; set; }
+
+    [Column("DmsClientId")]
     public string? DmsClientId { get; set; }
 
-    [Column("client_code")]
+    [Column("ClientCode")]
     public string? ClientCode { get; set; }
 
-    [Column("company_name")]
-    public string CompanyName { get; set; } = string.Empty;
+    [Column("Name")]
+    public string? Name { get; set; }
 
-    [Column("address")]
+    [Column("company_name")]
+    public string? CompanyName { get; set; }
+
+    [Column("Address")]
     public string? Address { get; set; }
 
-    [Column("contact_person")]
+    [Column("ContactPerson")]
     public string? ContactPerson { get; set; }
 
-    [Column("contact_number")]
+    [Column("ContactNumber")]
     public string? ContactNumber { get; set; }
 
-    [Column("email")]
+    [Column("Email")]
     public string? Email { get; set; }
 
-    [Column("is_active")]
+    [Column("IsActive")]
     public bool? IsActive { get; set; }
 
-    [Column("synced_from_dms")]
+    [Column("SyncedFromDms")]
     public bool? SyncedFromDms { get; set; }
 
-    [Column("last_synced_at")]
+    [Column("LastSyncedAt")]
     public DateTime? LastSyncedAt { get; set; }
 
-    [Column("created_at")]
+    [Column("CreatedAt")]
     public DateTime? CreatedAt { get; set; }
 
-    [Column("updated_at")]
+    [Column("UpdatedAt")]
     public DateTime? UpdatedAt { get; set; }
 }
 

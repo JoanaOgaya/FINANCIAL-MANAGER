@@ -7,21 +7,20 @@ import { KpiCard } from '../components/shared/KpiCard';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
 import { useQuery } from '../hooks/useQuery';
 import { RecentActivity } from '../components/RecentActivity';
+import { ErrorState } from '../components/shared/ErrorState';
 import { AccountantDashboard } from './AccountantDashboard';
 import { HeadAccountantDashboard } from './HeadAccountantDashboard';
 import { DashboardBanner, peso } from '../components/DashboardWidgets';
-import { DonutWidget } from '../components/DashboardCharts';
+import { DonutWidget, AgingBarWidget } from '../components/DashboardCharts';
 import { DashboardAiAlerts } from '../components/ai/DashboardAiAlerts';
-import { invoicesService } from '../services/invoicesService';
+import { dashboardService } from '../services/dashboardService';
 import { arService } from '../services/arService';
 import { paymentsService } from '../services/paymentsService';
 import { cashFlowService } from '../services/cashFlowService';
 import { liquidationsService } from '../services/liquidationsService';
-import { clientsService } from '../services/clientsService';
 import { auditLogsService } from '../services/auditLogsService';
-import { duplicatesService } from '../services/duplicates.service';
 import { formatCurrency, formatDate } from '../utils/format';
-import type { Invoice, ARRecord, Payment, CashFlowRecord, Liquidation, Client, AuditLog } from '../types/entities';
+import type { ARRecord, Payment, CashFlowRecord, Liquidation, AuditLog, FinanceManagerDashboardSummary } from '../types/entities';
 
 // ── Assistant Finance Dashboard ──────────────────────────────────────
 const AsstFinanceDashboard: React.FC = () => {
@@ -221,182 +220,93 @@ const AsstFinanceDashboard: React.FC = () => {
 // ── Finance Manager Dashboard ────────────────────────────────────────
 const FinanceManagerDashboard: React.FC = () => {
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const selectedClientId = searchParams.get('client');
-
-  const { data: invoicesData } = useQuery('fm:invoices', () => invoicesService.list({ pageSize: 100 }));
-  const { data: arData } = useQuery('fm:ar', () => arService.records({ pageSize: 100 }));
-  const { data: paymentsData } = useQuery('fm:payments', () => paymentsService.list({ pageSize: 100 }));
-  const { data: clientsData } = useQuery('fm:clients', () => clientsService.list({ pageSize: 100 }));
-  const { data: auditData } = useQuery('fm:audit', () => auditLogsService.list({ pageSize: 20 }));
-  const { data: cashData } = useQuery('fm:cash', () => cashFlowService.list({ pageSize: 100 }));
-  const { data: flaggedData } = useQuery('fm:flagged', () => duplicatesService.flagged({ pageSize: 100 }));
-
-  const invoices: Invoice[] = invoicesData?.items || [];
-  const arRecords: ARRecord[] = arData?.items || [];
-  const payments: Payment[] = paymentsData?.items || [];
-  const clients: Client[] = clientsData?.items || [];
-  const auditLogs: AuditLog[] = auditData?.items || [];
-  const cashFlowRecords: CashFlowRecord[] = cashData?.items || [];
-  const flaggedItems = flaggedData?.items || [];
-
   const [collectionTrendView, setCollectionTrendView] = useState<'weekly' | 'monthly'>('monthly');
   const [showInflow, setShowInflow] = useState(true);
   const [showOutflow, setShowOutflow] = useState(true);
-
-  const filteredInvoices = selectedClientId ? invoices.filter(i => i.clientId === selectedClientId) : invoices;
-  const filteredAR = selectedClientId ? arRecords.filter(r => r.clientId === selectedClientId) : arRecords;
-  const filteredPayments = selectedClientId ? payments.filter(p => p.clientId === selectedClientId) : payments;
-
-  const totalBilled = filteredInvoices.reduce((s: number, i: Invoice) => s + i.totalAmount, 0);
-  const totalCollected = filteredInvoices.filter(i => i.status === 'Paid').reduce((s: number, i: Invoice) => s + i.totalAmount, 0);
-  const totalAR = arRecords.reduce((s: number, r: ARRecord) => s + r.outstandingBalance, 0);
-  const collectionRate = totalBilled > 0 ? ((totalCollected / totalBilled) * 100).toFixed(1) : '0.0';
-
-  const currentMonth = new Date().getMonth();
-  const currentYear = new Date().getFullYear();
-  const cashInflow = filteredPayments.filter(p => {
-    const d = new Date(p.recordedAt);
-    return d.getMonth() === currentMonth && d.getFullYear() === currentYear && p.status === 'Validated';
-  }).reduce((s: number, p: Payment) => s + p.amount, 0);
-
-  // AR Aging Donut Data
-  const agingData = [
-    { name: 'Current', value: filteredAR.filter(r => r.agingBracket === 'Current').reduce((s, r) => s + r.outstandingBalance, 0), color: '#3B82F6' },
-    { name: '0-30 Days', value: filteredAR.filter(r => r.agingBracket === '0-30 days').reduce((s, r) => s + r.outstandingBalance, 0), color: '#10B981' },
-    { name: '31-60 Days', value: filteredAR.filter(r => r.agingBracket === '31-60 days').reduce((s, r) => s + r.outstandingBalance, 0), color: '#F59E0B' },
-    { name: '61-90 Days', value: filteredAR.filter(r => r.agingBracket === '61-90 days').reduce((s, r) => s + r.outstandingBalance, 0), color: '#F97316' },
-    { name: '90+ Days', value: filteredAR.filter(r => r.agingBracket === '90+ days').reduce((s, r) => s + r.outstandingBalance, 0), color: '#EF4444' },
-  ].filter(d => d.value > 0);
-
-  // Dynamic Cash Flow Trend Data
-  const monthlyDataMap: Record<string, { inflow: number; outflow: number }> = {
-    'Jan': { inflow: 0, outflow: 0 },
-    'Feb': { inflow: 0, outflow: 0 },
-    'Mar': { inflow: 0, outflow: 0 },
-    'Apr': { inflow: 0, outflow: 0 },
-    'May': { inflow: 0, outflow: 0 },
-    'Jun': { inflow: 0, outflow: 0 },
-    'Jul': { inflow: 0, outflow: 0 },
-    'Aug': { inflow: 0, outflow: 0 },
-    'Sep': { inflow: 0, outflow: 0 },
-    'Oct': { inflow: 0, outflow: 0 },
-    'Nov': { inflow: 0, outflow: 0 },
-    'Dec': { inflow: 0, outflow: 0 },
-  };
-
-  cashFlowRecords.forEach(record => {
-    const d = new Date(record.date);
-    if (d.getFullYear() === currentYear) {
-      const monthStr = d.toLocaleString('default', { month: 'short' });
-      if (monthlyDataMap[monthStr]) {
-        if (record.type === 'Inflow') {
-          monthlyDataMap[monthStr].inflow += record.amount;
-        } else if (record.type === 'Outflow') {
-          monthlyDataMap[monthStr].outflow += record.amount;
-        }
-      }
-    }
-  });
-
-  const cashflowTrendMonthly = Object.keys(monthlyDataMap).map(key => ({
-    period: key,
-    inflow: monthlyDataMap[key].inflow,
-    outflow: monthlyDataMap[key].outflow,
-  }));
-
-  const weeklyDataMap: Record<string, { inflow: number; outflow: number }> = {};
-  cashFlowRecords.forEach(record => {
-    const d = new Date(record.date);
-    if (d.getFullYear() === currentYear && d.getMonth() === currentMonth) {
-      const week = Math.ceil(d.getDate() / 7);
-      const weekStr = `W${week} ${d.toLocaleString('default', { month: 'short' })}`;
-      if (!weeklyDataMap[weekStr]) {
-        weeklyDataMap[weekStr] = { inflow: 0, outflow: 0 };
-      }
-      if (record.type === 'Inflow') {
-        weeklyDataMap[weekStr].inflow += record.amount;
-      } else if (record.type === 'Outflow') {
-        weeklyDataMap[weekStr].outflow += record.amount;
-      }
-    }
-  });
-
-  const cashflowTrendWeekly = Object.keys(weeklyDataMap).map(key => ({
-    period: key,
-    inflow: weeklyDataMap[key].inflow,
-    outflow: weeklyDataMap[key].outflow,
-  }));
-
-  const trendData = collectionTrendView === 'monthly' ? cashflowTrendMonthly : (cashflowTrendWeekly.length > 0 ? cashflowTrendWeekly : [{ period: 'W1', inflow: 0, outflow: 0 }]);
-
-  const topPayingClients = [...clients]
-    .map(c => {
-      const collected = payments.filter(p => p.clientId === c.id && p.status === 'Validated').reduce((sum, p) => sum + p.amount, 0);
-      return { id: c.id, name: c.name, collected };
-    })
-    .filter(c => c.collected > 0)
-    .sort((a, b) => b.collected - a.collected)
-    .slice(0, 5);
-
-  const rawNearDueAccounts = invoices
-    .filter(inv => inv.status !== 'Paid' && inv.status !== 'Sent' && inv.status !== 'Overdue')
-    .map(inv => {
-      const client = clients.find(c => c.id === inv.clientId);
-      const dueDate = new Date(inv.dueDate);
-      const daysRemaining = Math.ceil((dueDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-      return {
-        id: inv.id,
-        clientId: inv.clientId,
-        clientName: client?.name || inv.clientId,
-        invoiceNumber: inv.invoiceNumber,
-        amountDue: inv.totalAmount,
-        dueDate: inv.dueDate,
-        daysRemaining,
-      };
-    })
-    .filter(r => r.daysRemaining >= 0 && r.daysRemaining <= 7);
-
-  const nearDueCount = rawNearDueAccounts.length;
-
-  const nearDueAccounts = selectedClientId
-    ? rawNearDueAccounts.filter(r => r.clientId === selectedClientId).sort((a, b) => a.daysRemaining - b.daysRemaining)
-    : rawNearDueAccounts.sort((a, b) => a.daysRemaining - b.daysRemaining);
-
   const { user: authUser } = useAuth();
+  const dashboardQuery = useQuery(
+    `dashboard:finance-manager:${authUser?.employeeId}:${selectedClientId ?? 'all'}:${collectionTrendView}`,
+    () => dashboardService.financeManagerExecutive({
+      clientId: selectedClientId ?? undefined,
+      period: collectionTrendView,
+    }),
+    { enabled: !!authUser },
+  );
+  const summary = dashboardQuery.data;
   const bannerName = (authUser?.fullName || 'Manager').split(' ')[0];
+
+  if (!summary && dashboardQuery.isLoading) {
+    return <div role="status" aria-live="polite" style={{ padding: 40, color: '#64748B' }}>Loading executive dashboard…</div>;
+  }
+
+  if (!summary && dashboardQuery.error) {
+    return <ErrorState error={dashboardQuery.error} onRetry={dashboardQuery.refetch} />;
+  }
+
+  if (!summary) {
+    return <ErrorState error={new Error('Executive dashboard data is unavailable.')} onRetry={dashboardQuery.refetch} />;
+  }
+
+  const agingColors: Record<string, string> = {
+    Current: '#3B82F6',
+    '0-30 days': '#10B981',
+    '31-60 days': '#F59E0B',
+    '61-90 days': '#F97316',
+    '90+ days': '#EF4444',
+  };
+  const agingData = (summary.agingBuckets && summary.agingBuckets.length > 0
+    ? summary.agingBuckets
+    : [
+        { label: 'Current', value: 0 },
+        { label: '0-30 days', value: 0 },
+        { label: '31-60 days', value: 0 },
+        { label: '61-90 days', value: 0 },
+        { label: '90+ days', value: 0 },
+      ]
+  ).map(bucket => ({
+    name: bucket.label,
+    value: bucket.value,
+    color: agingColors[bucket.label] ?? '#64748B'
+  }));
+  const hasAgingData = agingData.some(bucket => bucket.value > 0);
+  const trendData = summary.cashFlowAnalytics;
+  const hasCashFlowData = trendData.some(row => row.inflow > 0 || row.outflow > 0);
+  const nearDueAccounts = summary.nearDueAccounts;
+  const nearDueCount = summary.accountsNearDueDate;
+  const totalAttentionItems = summary.duplicateAlerts + nearDueCount;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {dashboardQuery.error && <ErrorState error={dashboardQuery.error} onRetry={dashboardQuery.refetch} />}
       <DashboardBanner
         eyebrow="Finance Manager · Executive Overview"
         title={`Hi ${bannerName}, here's your financial overview`}
-        subtitle={`${peso(totalAR)} outstanding · ${collectionRate}% collection rate · ${nearDueCount} account(s) near due.`}
+        subtitle={`${peso(summary.totalArOutstanding)} outstanding · ${summary.collectionRate.toFixed(1)}% collection rate · ${nearDueCount} account(s) near due.`}
         gradient="linear-gradient(135deg, #0F172A 0%, #1E3A8A 60%, #0D9488 100%)"
         icon="ti-building-bank"
-        cta={{ label: 'View Reports', icon: 'ti-chart-bar', onClick: () => navigate('/reports') }}
-        secondaryCta={{ label: 'For Review', onClick: () => navigate('/for-review') }}
       />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
-          <KpiCard label="Total Invoices Billed" value={filteredInvoices.length} icon="ti-file-invoice" variant="new" periodText={`Total: ${formatCurrency(totalBilled)}`} />
-          <KpiCard label="Total AR Outstanding" value={formatCurrency(totalAR)} icon="ti-report-money" variant="warning" />
-          <KpiCard label="Collection Rate" value={`${collectionRate}%`} icon="ti-chart-pie" variant="info" periodText="vs. total invoiced" />
-          <KpiCard label="Cash Inflow (This Month)" value={formatCurrency(cashInflow)} icon="ti-cash" variant="success" />
+          <KpiCard label="Total Invoices Billed" value={summary.totalInvoicesBilled} icon="ti-file-invoice" variant="new" periodText={`Total: ${formatCurrency(summary.totalInvoiceAmount)}`} />
+          <KpiCard label="Total AR Outstanding" value={formatCurrency(summary.totalArOutstanding)} icon="ti-report-money" variant="warning" />
+          <KpiCard label="Collection Rate" value={`${summary.collectionRate.toFixed(1)}%`} icon="ti-chart-pie" variant="info" periodText={`Collected: ${formatCurrency(summary.totalCollected)}`} />
+          <KpiCard label="Cash Inflow (This Month)" value={formatCurrency(summary.cashInflowThisMonth)} icon="ti-cash" variant="success" periodText="From recorded cash-flow transactions" />
         </div>
 
         {/* Needs your attention panel */}
         <div style={{ background: '#FFF', borderRadius: '12px', border: '1px solid #E2E8F0', padding: '0' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid #E2E8F0' }}>
             <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#0F172A' }}>Needs your attention</h3>
-            <span style={{ fontSize: '13px', color: '#94A3B8' }}>{flaggedItems.length + nearDueCount} items</span>
+            <span style={{ fontSize: '13px', color: '#94A3B8' }}>{totalAttentionItems} items</span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid #E2E8F0' }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
                 <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#EF4444', marginTop: '6px' }} />
                 <div>
-                  <div style={{ fontSize: '13.5px', fontWeight: 600, color: '#0F172A', marginBottom: '2px' }}>{flaggedItems.length} duplicate alerts</div>
+                  <div style={{ fontSize: '13.5px', fontWeight: 600, color: '#0F172A', marginBottom: '2px' }}>{summary.duplicateAlerts} duplicate alerts</div>
                   <div style={{ fontSize: '12.5px', color: '#94A3B8' }}>Invoices and payments flagged by detection service</div>
                 </div>
               </div>
@@ -440,8 +350,9 @@ const FinanceManagerDashboard: React.FC = () => {
             </div>
           </div>
           <div style={{ width: '100%', height: 280, flex: 1 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={trendData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+            {hasCashFlowData ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={trendData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorInflow" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#10B981" stopOpacity={0.4} />
@@ -463,8 +374,16 @@ const FinanceManagerDashboard: React.FC = () => {
                 />
                 <Area type="monotone" dataKey="inflow" hide={!showInflow} stroke="#10B981" strokeWidth={2} fillOpacity={1} fill="url(#colorInflow)" activeDot={{ r: 6, fill: '#10B981', stroke: '#fff', strokeWidth: 2 }} />
                 <Area type="monotone" dataKey="outflow" hide={!showOutflow} stroke="#0D9488" strokeWidth={2} fillOpacity={1} fill="url(#colorOutflow)" activeDot={{ r: 6, fill: '#0D9488', stroke: '#fff', strokeWidth: 2 }} />
-              </AreaChart>
-            </ResponsiveContainer>
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div
+                role="status"
+                style={{ height: '100%', display: 'grid', placeItems: 'center', color: '#94A3B8', fontSize: '0.875rem' }}
+              >
+                No cash-flow transactions recorded for this period.
+              </div>
+            )}
           </div>
           
           <div style={{ display: 'flex', justifyContent: 'center', gap: '24px', paddingBottom: '16px' }}>
@@ -488,13 +407,13 @@ const FinanceManagerDashboard: React.FC = () => {
         <Card style={{ display: 'flex', flexDirection: 'column' }}>
           <h3 style={{ margin: '0 0 16px 0', fontSize: '1rem', fontWeight: 700, color: '#0F172A' }}>Top Paying Clients</h3>
           <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 0 }}>
-            {topPayingClients.length > 0 ? topPayingClients.map((c, i) => (
-              <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: i < topPayingClients.length - 1 ? '1px solid #F1F5F9' : 'none' }}>
+            {summary.topPayingClients.length > 0 ? summary.topPayingClients.map((c, i) => (
+              <div key={c.clientId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: i < summary.topPayingClients.length - 1 ? '1px solid #F1F5F9' : 'none' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                   <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#F1F5F9', color: '#64748B', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 700 }}>{i + 1}</div>
-                  <span style={{ fontSize: '0.875rem', fontWeight: 500, color: '#0F172A' }}>{c.name}</span>
+                  <span style={{ fontSize: '0.875rem', fontWeight: 500, color: '#0F172A' }}>{c.clientName}</span>
                 </div>
-                <span style={{ fontSize: '0.875rem', fontWeight: 700, color: '#10B981' }}>{formatCurrency(c.collected)}</span>
+                <span style={{ fontSize: '0.875rem', fontWeight: 700, color: '#10B981' }}>{formatCurrency(c.amount)}</span>
               </div>
             )) : (
               <div style={{ fontSize: '0.85rem', color: '#64748B', textAlign: 'center', padding: '20px 0' }}>No payment data yet.</div>
@@ -509,14 +428,25 @@ const FinanceManagerDashboard: React.FC = () => {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 24, marginBottom: 24 }}>
-        <DonutWidget
-          title="AR Aging Distribution"
-          subtitle="Outstanding balance by overdue period"
-          icon="ti-calendar-time"
-          data={agingData}
-          centerLabel="TOTAL AR"
-          centerNumber={formatCurrency(totalAR)}
-        />
+        {hasAgingData ? (
+          <AgingBarWidget
+            title="AR Aging Distribution"
+            subtitle="Outstanding balance by overdue period"
+            icon="ti-calendar-time"
+            data={agingData}
+            totalLabel="TOTAL AR"
+            totalAmount={formatCurrency(summary.totalArOutstanding)}
+            defaultChartType="bar"
+          />
+        ) : (
+          <Card style={{ minHeight: 300, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
+            <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: '#0F172A' }}>AR Aging Distribution</h3>
+            <p role="status" style={{ margin: '12px 0 0', color: '#64748B', fontSize: '0.875rem' }}>
+              No outstanding receivables to age.
+            </p>
+            <strong style={{ marginTop: 12, color: '#0F172A' }}>{formatCurrency(summary.totalArOutstanding)} total AR</strong>
+          </Card>
+        )}
         
         <Card style={{ display: 'flex', flexDirection: 'column' }}>
           <h3 style={{ margin: '0 0 4px 0', fontSize: '1rem', fontWeight: 700, color: '#0F172A' }}>Accounts Near Due Date</h3>
@@ -524,7 +454,7 @@ const FinanceManagerDashboard: React.FC = () => {
           
           <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 0 }}>
             {nearDueAccounts.slice(0, 5).map((account, index, arr) => (
-              <div key={account.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: index < arr.length - 1 ? '1px solid #F1F5F9' : 'none' }}>
+              <div key={`${account.clientId}-${account.dueDate}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: index < arr.length - 1 ? '1px solid #F1F5F9' : 'none' }}>
                 <span style={{ fontSize: '0.875rem', color: '#0F172A', fontWeight: 500 }}>{account.clientName}</span>
                 {account.daysRemaining < 0 ? (
                   <span style={{ fontSize: '0.875rem', color: '#EF4444', fontWeight: 500 }}>{Math.abs(account.daysRemaining)} days overdue</span>
@@ -549,9 +479,7 @@ const FinanceManagerDashboard: React.FC = () => {
 
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 24 }}>
         <RecentActivity
-          logs={auditLogs.filter(l => l.userRole === 'Financial Manager' || l.userRole === 'FINANCIAL_MANAGER').length > 0
-            ? auditLogs.filter(l => l.userRole === 'Financial Manager' || l.userRole === 'FINANCIAL_MANAGER').slice(0, 5)
-            : auditLogs.slice(0, 5)}
+          logs={summary.recentActivity}
           onViewAll={() => navigate('/audit-logs')}
         />
         
@@ -567,7 +495,7 @@ const FinanceManagerDashboard: React.FC = () => {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '24px 0' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontSize: '13px', color: '#475569' }}>Total Flagged</span>
-              <span style={{ fontSize: '16px', fontWeight: 700, color: '#EF4444' }}>{flaggedItems.length}</span>
+              <span style={{ fontSize: '16px', fontWeight: 700, color: '#EF4444' }}>{summary.duplicateAlerts}</span>
             </div>
             <button
               onClick={() => navigate('/flagged-duplicates')}
@@ -587,6 +515,53 @@ const FinanceManagerDashboard: React.FC = () => {
           </div>
         </Card>
       </div>
+
+      <section aria-labelledby="executive-insights-title">
+        <h3 id="executive-insights-title" style={{ margin: '0 0 12px', fontSize: '0.95rem', fontWeight: 800, color: '#0F172A' }}>
+          Live Financial &amp; Workflow Alerts
+        </h3>
+        {summary.insights.length === 0 ? (
+          <div role="status" style={{ background: '#fff', border: '1px dashed #CBD5E1', borderRadius: 12, padding: 20, color: '#64748B', textAlign: 'center' }}>
+            No open financial or workflow alerts.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {summary.insights.map(insight => (
+              <div
+                key={insight.id}
+                style={{
+                  background: '#fff',
+                  border: `1px solid ${insight.severity === 'high' || insight.severity === 'critical' ? '#FECACA' : '#CCFBF1'}`,
+                  borderRadius: 12,
+                  padding: '16px 20px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 16,
+                }}
+              >
+                <div>
+                  <strong style={{ color: '#0F172A', fontSize: '0.9rem' }}>{insight.title}</strong>
+                  <p style={{ margin: '4px 0 0', color: '#475569', fontSize: '0.85rem' }}>{insight.message}</p>
+                  <span style={{ display: 'block', marginTop: 6, color: '#94A3B8', fontSize: '0.75rem' }}>
+                    Current records · {formatDate(insight.createdAt)}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => navigate(insight.targetRoute)}
+                  style={{ background: 'none', border: 'none', color: '#0D9488', fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                >
+                  Review →
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+      <p style={{ margin: 0, textAlign: 'right', color: '#94A3B8', fontSize: '0.75rem' }}>
+        Dashboard data as of {formatDate(summary.asOf)}
+      </p>
     </div>
   );
 };
@@ -615,7 +590,7 @@ export const Dashboard: React.FC = () => {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <RoleDashboard />
-      <DashboardAiAlerts />
+      {user.role !== 'FINANCIAL_MANAGER' && <DashboardAiAlerts />}
     </div>
   );
 };

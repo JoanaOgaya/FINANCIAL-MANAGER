@@ -276,8 +276,7 @@ export default function FinancialAdjustments() {
 
       <TableContainer>
         <DataTable
-          title={isReviewer ? 'Financial Validation' : 'Financial Adjustments'}
-          subtitle={isReviewer ? 'Review and validate adjustment requests.' : 'Create and manage adjustment requests for client accounts.'}
+          title=""
           exportable={true}
           createButtons={isReviewer ? undefined : [
             {

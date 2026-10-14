@@ -510,7 +510,7 @@ export const Receipts: React.FC = () => {
             { label: 'View Details', icon: 'ti-eye', onClick: (row: any) => navigate(`/receipts/${row.id}`) }
           ]}
           rowKey="id"
-          title="Official Receipts"
+          title=""
           searchPlaceholder="Search clients..."
           searchFields={['clientName'] as any}
           emptyMessage="No official receipts issued yet."

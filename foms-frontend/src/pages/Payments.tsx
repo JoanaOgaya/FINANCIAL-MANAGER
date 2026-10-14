@@ -1583,7 +1583,7 @@ const PaymentsContent: React.FC = () => {
             },
           ]}
           rowKey="id"
-          title="Cash Flow — Payment Transactions"
+          title=""
           searchPlaceholder="Search by client, invoice, or reference..."
           searchFields={['clientName', 'invoiceNumber', 'referenceNumber'] as any}
           emptyMessage="No cash flow records found. Adjust your filters or wait for validated payments."

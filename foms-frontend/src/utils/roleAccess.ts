@@ -40,10 +40,10 @@ export const MODULES: readonly ModuleDef[] = [
   { key: 'dashboard', label: 'Dashboard', labelByRole: { [FM]: 'Executive Dashboard' }, group: 'Overview', icon: 'ti ti-layout-dashboard', path: '/dashboard', nav: true, roles: everyone(['view']) },
 
   { key: 'clients', label: 'Client Accounts', group: 'Client Management', icon: 'ti ti-users', path: '/clients', detailPath: '/clients/:id', nav: true, roles: { [ACC]: ['view', 'create', 'edit'], [FM]: ['view'] } },
-  { key: 'rates', label: 'Rate Configuration', group: 'Client Management', icon: 'ti ti-adjustments-dollar', path: '/rate-configuration', detailPath: '/rate-configuration/:id', nav: true, roles: { [FM]: ['view'] } },
-  { key: 'waybills', label: 'Waybills & POD', group: 'Client Management', icon: 'ti ti-truck-delivery', path: '/waybills', detailPath: '/waybills/:id', nav: true, roles: { [FM]: ['view'] } },
+  { key: 'rates', label: 'Rate Configuration', group: 'Client Management', icon: 'ti ti-adjustments-dollar', path: '/rate-configuration', detailPath: '/rate-configuration/:id', nav: false, roles: {} },
+  { key: 'waybills', label: 'Waybills & POD', group: 'Client Management', icon: 'ti ti-truck-delivery', path: '/waybills', detailPath: '/waybills/:id', nav: false, roles: {} },
 
-  { key: 'invoiceCreate', label: 'Create Invoice', group: 'Invoicing', icon: 'ti ti-file-plus', path: '/invoice-create', nav: true, roles: { [ACC]: ['view', 'create', 'submit'], [FM]: ['view'] } },
+  { key: 'invoiceCreate', label: 'Create Invoice', group: 'Invoicing', icon: 'ti ti-file-plus', path: '/invoice-create', nav: false, roles: {} },
   { key: 'invoicingDesk', label: 'Invoice List', group: 'Invoicing', icon: 'ti ti-file-invoice', path: '/invoicing-desk', detailPath: '/invoicing-desk/:id', nav: true, roles: { [ACC]: ['view', 'edit', 'submit'], [HA]: ['view', 'verify', 'return'], [FM]: ['view', 'approve', 'reject'] } },
   { key: 'billingValidation', label: 'Billing Validation', group: 'Invoicing', icon: 'ti ti-file-check', path: '/billing-validation', nav: true, roles: { [ACC]: ['view'], [HA]: ['view', 'verify', 'return'], [FM]: ['view', 'approve', 'reject'] } },
   { key: 'invoiceReview', label: 'Invoice Review', group: 'Invoicing', icon: 'ti ti-file-search', path: '/invoice-review', detailPath: '/invoice-review/:id', nav: true, roles: { [HA]: ['view', 'verify', 'return'], [FM]: ['view', 'approve', 'reject'] } },
@@ -62,11 +62,11 @@ export const MODULES: readonly ModuleDef[] = [
   // ── Duplicate Detection (role table — see DUPLICATE_SECTION below) ──
   //   Duplicate Scan     : ACC, AFM (FM, HA hidden -> 403)
   //   Unique Documents   : FM, HA (all), ACC, AFM (dept only)
-  //   Flagged Duplicates : HA "For Review" (Level 2), ACC "Flagged" (Level 1), AFM liquidation Level 1 (FM hidden -> 403)
+  //   Flagged Duplicates : HA "For Review" (Level 2), ACC "Flagged" (Level 1), AFM liquidation Level 1, FM liquidation Level 2
   //   Review History     : FM, HA (all), ACC, AFM (audit)
   { key: 'duplicateScan', label: 'Duplicate Scan', group: 'Duplicate Detection', icon: 'ti ti-scan', path: '/duplicate-scan', nav: true, roles: { [ACC]: ['view', 'scan'], [AFM]: ['view', 'scan'] } },
   { key: 'uniqueDocuments', label: 'Unique Documents', group: 'Duplicate Detection', icon: 'ti ti-file-check', path: '/unique-documents', nav: true, roles: { [FM]: ['view'], [HA]: ['view'], [ACC]: ['view'], [AFM]: ['view'] } },
-  { key: 'flaggedDuplicates', label: 'Flagged Duplicates', labelByRole: { [HA]: 'For Review', [ACC]: 'Flagged' }, group: 'Duplicate Detection', icon: 'ti ti-alert-triangle', path: '/flagged-duplicates', nav: true, roles: { [HA]: ['view', 'approve', 'return'], [ACC]: ['view', 'submit'], [AFM]: ['view', 'submit'] } },
+  { key: 'flaggedDuplicates', label: 'Flagged Duplicates', labelByRole: { [HA]: 'For Review', [ACC]: 'Flagged' }, group: 'Duplicate Detection', icon: 'ti ti-alert-triangle', path: '/flagged-duplicates', nav: true, roles: { [FM]: ['view', 'approve', 'return'], [HA]: ['view', 'approve', 'return'], [ACC]: ['view', 'submit'], [AFM]: ['view', 'submit'] } },
   { key: 'reviewHistory', label: 'Review History', group: 'Duplicate Detection', icon: 'ti ti-history', path: '/review-history', nav: true, roles: { [FM]: ['view', 'export'], [HA]: ['view', 'export'], [ACC]: ['view', 'export'], [AFM]: ['view', 'export'] } },
   { key: 'documentExtraction', label: 'Document Extraction', group: 'Document Intelligence', icon: 'ti ti-file-analytics', path: '/document-extraction', nav: true, roles: { [ACC]: ['view', 'create', 'edit'], [AFM]: ['view', 'create', 'verify'] } },
   { key: 'forReview', label: 'For Review', group: 'Duplicate Detection', icon: 'ti ti-eye-check', path: '/for-review', nav: false, roles: { [HA]: ['view', 'verify', 'return'], [FM]: ['view', 'approve', 'reject'] } },
@@ -280,4 +280,3 @@ export function canUploadDocuments(role: Role | undefined | null, docType?: stri
   if (role === ROLES.ASSISTANT_FM) return !docType || isLiquidationDoc(docType);
   return false;
 }
-

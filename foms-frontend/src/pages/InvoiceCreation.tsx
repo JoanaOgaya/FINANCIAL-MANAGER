@@ -370,7 +370,7 @@ export const InvoiceCreation: React.FC = () => {
         <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column' }}>
           <TableContainer style={{ display: 'flex', flexDirection: 'column', gap: 24, paddingBottom: 24, flex: 1 }}>
             <DataTable
-              title="Select Client Account"
+              title=""
               data={clientsWithPending}
               columns={clientColumns}
               rowKey="id"

@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { PageHeader } from '../components/shared/PageHeader';
 import { DataTable, type Column } from '../components/shared/DataTable';
 import FilterBar from '../components/shared/FilterBar';
 import Button from '../components/Buttons';
@@ -194,17 +193,6 @@ export const AIOutputHistory: React.FC = () => {
     <AiErrorBoundary>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
-          <PageHeader
-            title="AI Output History &amp; Audit Trail"
-            subtitle={
-              scope === 'liquidation'
-                ? 'Historical AI outputs and validations for liquidation and expense documents.'
-                : scope === 'own'
-                ? 'Historical AI outputs and validation logs within your assigned accounts.'
-                : 'Organization-wide historical audit trail of AI-generated suggestions and human decisions.'
-            }
-          />
-
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
             <AiDisclaimer />
             {canExport && (

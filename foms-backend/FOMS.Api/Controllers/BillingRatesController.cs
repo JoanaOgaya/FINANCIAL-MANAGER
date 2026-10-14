@@ -149,7 +149,7 @@ public class BillingRatesController : ControllerBase
             else
             {
                 var matched = await _fomsDb.Clients.FirstOrDefaultAsync(c => c.ClientCode == dto.ClientId || c.DmsClientId == dto.ClientId);
-                if (matched != null) targetClientId = matched.ClientId;
+                if (matched != null && matched.ClientId.HasValue) targetClientId = matched.ClientId.Value;
             }
         }
 
@@ -374,7 +374,7 @@ public class BillingRecordsController : ControllerBase
         var items = records.Select(b =>
         {
             var wb = waybills.FirstOrDefault(w => w.WaybillId == b.WaybillId);
-            var c = clients.FirstOrDefault(cl => cl.ClientId == b.ClientId);
+            var c = clients.FirstOrDefault(cl => cl.ClientId == b.ClientId || cl.Id == $"CA-00{b.ClientId}");
             string clientCode = c?.ClientCode ?? (b.ClientId == 1 ? "CA-001" : b.ClientId == 2 ? "CA-002" : b.ClientId.ToString());
             return new
             {
@@ -382,7 +382,7 @@ public class BillingRecordsController : ControllerBase
                 waybillId = b.WaybillId.ToString(),
                 clientId = clientCode,
                 clientCode = clientCode,
-                clientName = c?.CompanyName ?? (clientCode == "CA-001" ? "Lazada Philippines" : clientCode == "CA-002" ? "Shopee Philippines" : $"Client {b.ClientId}"),
+                clientName = c?.Name ?? c?.CompanyName ?? (clientCode == "CA-001" ? "Lazada Philippines" : clientCode == "CA-002" ? "Shopee Philippines" : $"Client {b.ClientId}"),
                 rateId = "1",
                 volumeWeight = 1m,
                 actualWeight = wb?.ActualWeight ?? 1m,

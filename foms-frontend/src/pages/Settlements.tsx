@@ -186,11 +186,6 @@ const Settlements: React.FC = () => {
 
       {/* Table Section */}
       <Card style={{ padding: '24px' }}>
-        <div>
-          <h2 style={{ margin: '0 0 4px', fontSize: '1.25rem', fontWeight: 800, color: '#0F172A' }}>Settlements</h2>
-          <p style={{ margin: '0 0 20px', fontSize: '0.85rem', color: '#64748B' }}>Review and validate leftover cash returns and reimbursement requests submitted by couriers.</p>
-        </div>
-        
         {/* Filters */}
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '20px' }}>
           <div style={{ position: 'relative', width: '280px' }}>

@@ -342,7 +342,7 @@ export const InvoiceReview: React.FC = () => {
       ) : (
         <TableContainer>
           <DataTable
-            title="Client Invoice Queue"
+            title=""
             rowKey="id"
             data={enrichedClients}
             searchPlaceholder="Search clients..."

@@ -131,7 +131,7 @@ public class AccountantController : ControllerBase
             .ToListAsync();
 
         var clientIds = unbilledWaybills.Select(w => w.ClientId).Distinct().ToList();
-        var clients = await _fomsDb.Clients.AsNoTracking().Where(c => clientIds.Contains(c.ClientId)).ToListAsync();
+        var clients = await _fomsDb.Clients.AsNoTracking().Where(c => c.ClientId.HasValue && clientIds.Contains(c.ClientId.Value)).ToListAsync();
 
         return Ok(new
         {
@@ -139,9 +139,9 @@ public class AccountantController : ControllerBase
             count = clients.Count,
             data = clients.Select(c => new
             {
-                clientId = c.ClientId,
-                clientCode = c.ClientCode ?? $"CA-{c.ClientId:D3}",
-                companyName = c.CompanyName,
+                clientId = c.ClientId ?? 0,
+                clientCode = c.ClientCode ?? $"CA-{(c.ClientId ?? 0):D3}",
+                companyName = c.Name ?? c.CompanyName,
                 unbilledWaybillCount = unbilledWaybills.Count(w => w.ClientId == c.ClientId)
             })
         });

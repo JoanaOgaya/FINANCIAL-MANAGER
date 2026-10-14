@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { DataTable } from '../components/DataTable';
@@ -21,6 +21,8 @@ import { Users, FileText, Phone, Mail, MapPin, Calendar as CalIcon, Hash, Settin
 import { CalendarPicker } from '../components/FormModals';
 import { computeFreightCost } from '../utils/billing';
 import { formatCurrency, formatDate } from '../utils/format';
+import { AiDisclaimer } from '../components/ai/AiDisclaimer';
+import { PriorityBadge } from '../components/ai/PriorityBadge';
 
 export const ClientManagement: React.FC = () => {
   const { id } = useParams();
@@ -233,6 +235,411 @@ export const ClientManagement: React.FC = () => {
     }
   };
 
+  // Helper to format client IDs cleanly
+  const formatClientId = (idStr?: string) => {
+    if (!idStr) return '—';
+    if (idStr.length > 15 && idStr.includes('-')) {
+      let hash = 0;
+      for (let i = 0; i < idStr.length; i++) {
+        hash = ((hash << 5) - hash) + idStr.charCodeAt(i);
+        hash |= 0;
+      }
+      const shortNum = Math.abs(hash) % 900 + 100;
+      return `CA-${shortNum}`;
+    }
+    return idStr;
+  };
+
+  // --- List View State & Metrics ---
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('All');
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const [recentSearches] = useState<string[]>(['Lazada Account', 'Shopee Express', 'Zalora Philippines', 'TikTok Shop']);
+
+  // Recommendation Review Modal State
+  const [selectedRecommendationClient, setSelectedRecommendationClient] = useState<{ client: Client; metrics: any } | null>(null);
+  const [recommendationDecision, setRecommendationDecision] = useState('Accept Recommendation');
+  const [recommendationRemarks, setRecommendationRemarks] = useState('');
+  const [recommendationLoading, setRecommendationLoading] = useState(false);
+
+  const handleOpenRecommendation = (client: Client, metrics?: any) => {
+    const m = metrics || clientMetrics.get(client.id);
+    setSelectedRecommendationClient({ client, metrics: m });
+    setRecommendationDecision('Accept Recommendation');
+    setRecommendationRemarks('');
+  };
+
+  const handleLogRecommendationDecision = async () => {
+    if (!selectedRecommendationClient) return;
+    setRecommendationLoading(true);
+    try {
+      const client = selectedRecommendationClient.client;
+      await auditLogsService.create({
+        action: 'REVIEW_RECOMMENDATION',
+        module: 'ClientManagement',
+        recordId: client.id,
+        recordType: 'Client',
+        details: `Logged recommendation review: "${recommendationDecision}" for client "${client.name}" (${client.id}). Notes: ${recommendationRemarks || 'None'}`,
+        ipAddress: '127.0.0.1',
+      });
+      toast.success(`Recommendation decision "${recommendationDecision}" logged for ${client.name}!`, 'Review Complete');
+      setSelectedRecommendationClient(null);
+    } catch {
+      toast.error('Failed to log recommendation decision.');
+    } finally {
+      setRecommendationLoading(false);
+    }
+  };
+
+  // Calculate client metrics map for high performance
+  const clientMetrics = useMemo(() => {
+    const map = new Map<string, {
+      totalBilled: number;
+      totalPaid: number;
+      balance: number;
+      maxOverdueDays: number;
+      displayDueDate: string | null;
+      priorityLevel: string;
+      priorityScore: number;
+      priorityScoreColor: string;
+      priorityBadgeBg: string;
+      priorityBadgeColor: string;
+      cardBorder: string;
+      actionBasis: string;
+    }>();
+
+    const now = Date.now();
+
+    clients.forEach(client => {
+      const clientInvoices = invoices.filter(inv => inv.clientId === client.id);
+      const totalBilled = clientInvoices.reduce((sum, inv) => sum + (inv.totalAmount || 0), 0);
+      const totalPaid = clientInvoices.filter(inv => inv.status === 'Paid').reduce((sum, inv) => sum + (inv.totalAmount || 0), 0);
+      const balance = Math.max(0, totalBilled - totalPaid);
+
+      let maxOverdueDays = 0;
+      clientInvoices.forEach(inv => {
+        if (inv.status === 'Overdue' || (inv.dueDate && new Date(inv.dueDate).getTime() < now && inv.status !== 'Paid')) {
+          if (inv.dueDate) {
+            const days = Math.max(0, Math.floor((now - new Date(inv.dueDate).getTime()) / (1000 * 60 * 60 * 24)));
+            if (days > maxOverdueDays) maxOverdueDays = days;
+          } else {
+            if (maxOverdueDays === 0) maxOverdueDays = 15;
+          }
+        }
+      });
+
+      const activeWithDueDate = clientInvoices
+        .filter(inv => inv.status !== 'Paid' && inv.dueDate)
+        .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+
+      let displayDueDate: string | null = null;
+      if (activeWithDueDate.length > 0) {
+        displayDueDate = new Date(activeWithDueDate[0].dueDate).toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric'
+        });
+      }
+
+      const cardBorder = maxOverdueDays > 0 ? '#FECACA' : '#E2E8F0';
+      let actionBasis = '';
+
+      if (client.status === 'Inactive') {
+        actionBasis = 'Account is currently inactive. Contact management to reactivate service.';
+      } else if (maxOverdueDays > 0) {
+        actionBasis = 'Client has consistently missed payment deadlines and has an outstanding balance.';
+      } else if (balance > 0) {
+        actionBasis = `Account in good standing with scheduled billing cycle of ₱${balance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}.`;
+      } else {
+        actionBasis = client.address
+          ? `Standard logistics billing terms with active corporate standing. Location: ${client.address}.`
+          : 'Standard logistics billing terms with active corporate standing.';
+      }
+
+      let priorityLevel = 'Low Priority';
+      let priorityScore = 20;
+      if (client.status === 'Inactive') {
+        priorityLevel = 'Inactive';
+        priorityScore = 0;
+      } else if (maxOverdueDays > 15) {
+        priorityLevel = 'High Priority';
+        priorityScore = 95;
+      } else if (maxOverdueDays > 0) {
+        priorityLevel = 'Medium Priority';
+        priorityScore = 65;
+      } else if (balance > 0) {
+        priorityLevel = 'Good Standing';
+        priorityScore = 30;
+      }
+
+      map.set(client.id, {
+        totalBilled,
+        totalPaid,
+        balance,
+        maxOverdueDays,
+        displayDueDate,
+        priorityLevel,
+        priorityScore,
+        priorityScoreColor: priorityScore >= 70 ? '#DC2626' : priorityScore >= 40 ? '#D97706' : '#16A34A',
+        priorityBadgeBg: priorityScore >= 70 ? '#FEF2F2' : priorityScore >= 40 ? '#FFFBEB' : '#F0FDF4',
+        priorityBadgeColor: priorityScore >= 70 ? '#DC2626' : priorityScore >= 40 ? '#D97706' : '#16A34A',
+        cardBorder,
+        actionBasis
+      });
+    });
+
+    return map;
+  }, [clients, invoices]);
+
+  const filteredClients = useMemo(() => {
+    return clients.filter(client => {
+      const q = searchQuery.toLowerCase().trim();
+      const formattedId = formatClientId(client.id).toLowerCase();
+      const matchesSearch = !q ||
+        (client.name || '').toLowerCase().includes(q) ||
+        (client.id || '').toLowerCase().includes(q) ||
+        formattedId.includes(q) ||
+        (client.contactPerson || '').toLowerCase().includes(q) ||
+        (client.address || '').toLowerCase().includes(q);
+
+      let matchesStatus = true;
+      if (statusFilter === 'Active') {
+        matchesStatus = client.status === 'Active';
+      } else if (statusFilter === 'Inactive') {
+        matchesStatus = client.status === 'Inactive';
+      }
+
+      return matchesSearch && matchesStatus;
+    });
+  }, [clients, searchQuery, statusFilter]);
+
+  const handleAddNew = () => {
+    setFormData({
+      name: '',
+      contactPerson: '',
+      contactNumber: '',
+      address: '',
+      rateType: 'Standard',
+      billingSchedule: 'Monthly',
+      status: 'Active'
+    });
+    setIsAddingNew(true);
+  };
+
+  const renderRecommendationModal = () => {
+    if (!selectedRecommendationClient) return null;
+    const { client, metrics } = selectedRecommendationClient;
+    const overdueDays = metrics?.maxOverdueDays || 0;
+    const displayDueDate = metrics?.displayDueDate || client.billingSchedule || '—';
+    const balanceVal = metrics?.balance || 0;
+    const totalBilled = metrics?.totalBilled || 0;
+    const totalPaid = metrics?.totalPaid || 0;
+
+    return createPortal(
+      <div
+        style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(15, 23, 42, 0.45)',
+          backdropFilter: 'blur(4px)',
+          zIndex: 99999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 24
+        }}
+        onClick={() => setSelectedRecommendationClient(null)}
+      >
+        <div
+          style={{
+            background: '#fff',
+            borderRadius: 16,
+            width: '100%',
+            maxWidth: 580,
+            boxShadow: '0 20px 60px rgba(0,0,0,0.18)',
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+            maxHeight: '90vh'
+          }}
+          onClick={e => e.stopPropagation()}
+        >
+          <div style={{ padding: '28px 32px', overflowY: 'auto' }}>
+            
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24, borderBottom: '1px solid #F1F5F9', paddingBottom: 16 }}>
+              <div>
+                <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#0D9488', letterSpacing: '0.05em', marginBottom: 4 }}>
+                  {formatClientId(client.id)}
+                </div>
+                <h3 style={{ margin: 0, fontSize: '1.45rem', fontWeight: 800, color: '#0F172A', marginBottom: 8 }}>
+                  {client.name}
+                </h3>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {client.status === 'Active' ? (
+                    <span style={{ background: '#DCFCE7', color: '#16A34A', border: '1px solid #BBF7D0', padding: '3px 10px', borderRadius: 9999, fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#16A34A' }} /> Active
+                    </span>
+                  ) : (
+                    <span style={{ background: '#F1F5F9', color: '#64748B', border: '1px solid #E2E8F0', padding: '3px 10px', borderRadius: 9999, fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#94A3B8' }} /> Inactive
+                    </span>
+                  )}
+                  {overdueDays > 0 ? (
+                    <span style={{ background: '#FEF2F2', color: '#DC2626', border: '1px solid #FECACA', padding: '3px 10px', borderRadius: 9999, fontSize: 12, fontWeight: 700 }}>
+                      {overdueDays} Days Overdue
+                    </span>
+                  ) : (
+                    <span style={{ background: '#F0FDF4', color: '#16A34A', border: '1px solid #BBF7D0', padding: '3px 10px', borderRadius: 9999, fontSize: 12, fontWeight: 700 }}>
+                      Good Standing
+                    </span>
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedRecommendationClient(null)}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#64748B', padding: 4 }}
+                title="Close"
+              >
+                <i className="ti ti-x" style={{ fontSize: 24 }} />
+              </button>
+            </div>
+
+            {/* Client Information */}
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: 800, color: '#0F172A', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <i className="ti ti-user" style={{ color: '#0D9488', fontSize: 16 }} />
+                Client Information
+              </div>
+              <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 10, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
+                  <span style={{ color: '#64748B', fontWeight: 500 }}>Client Name</span>
+                  <span style={{ fontWeight: 700, color: '#0F172A' }}>{client.name}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
+                  <span style={{ color: '#64748B', fontWeight: 500 }}>Client ID</span>
+                  <span style={{ fontWeight: 700, color: '#0F172A' }}>{formatClientId(client.id)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
+                  <span style={{ color: '#64748B', fontWeight: 500 }}>Contact Person</span>
+                  <span style={{ fontWeight: 700, color: '#0F172A' }}>{client.contactPerson || '—'}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
+                  <span style={{ color: '#64748B', fontWeight: 500 }}>Contact Number</span>
+                  <span style={{ fontWeight: 700, color: '#0F172A' }}>{client.phone || '—'}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
+                  <span style={{ color: '#64748B', fontWeight: 500 }}>Email Address</span>
+                  <span style={{ fontWeight: 700, color: '#0F172A' }}>{client.email || '—'}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
+                  <span style={{ color: '#64748B', fontWeight: 500 }}>Business Address</span>
+                  <span style={{ fontWeight: 700, color: '#0F172A', textAlign: 'right', maxWidth: '60%' }}>{client.address || '—'}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Financial & Billing Details */}
+            <div style={{ marginBottom: 28 }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: 800, color: '#0F172A', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <i className="ti ti-receipt" style={{ color: '#0D9488', fontSize: 16 }} />
+                Financial &amp; Billing Details
+              </div>
+              <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 10, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
+                  <span style={{ color: '#64748B', fontWeight: 500 }}>Outstanding Balance</span>
+                  <span style={{ fontWeight: 800, color: balanceVal > 0 ? '#DC2626' : '#16A34A', fontSize: '1rem' }}>
+                    ₱{balanceVal.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
+                  <span style={{ color: '#64748B', fontWeight: 500 }}>Due Date</span>
+                  <span style={{ fontWeight: 700, color: '#0F172A' }}>{displayDueDate}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
+                  <span style={{ color: '#64748B', fontWeight: 500 }}>Billing Schedule</span>
+                  <span style={{ fontWeight: 700, color: '#0F172A' }}>{client.billingSchedule || 'Monthly'}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
+                  <span style={{ color: '#64748B', fontWeight: 500 }}>Tax / VAT Status</span>
+                  <span style={{ fontWeight: 700, color: '#0F172A' }}>
+                    {client.vatStatus ? `${client.vatStatus} (${client.vatRate ?? 12}%)` : 'VATable (12%)'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
+                  <span style={{ color: '#64748B', fontWeight: 500 }}>Total Invoiced</span>
+                  <span style={{ fontWeight: 700, color: '#0F172A' }}>
+                    ₱{totalBilled.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
+                  <span style={{ color: '#64748B', fontWeight: 500 }}>Total Payments Settled</span>
+                  <span style={{ fontWeight: 700, color: '#16A34A' }}>
+                    ₱{totalPaid.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Buttons */}
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button
+                type="button"
+                onClick={() => setSelectedRecommendationClient(null)}
+                style={{
+                  flex: 1,
+                  padding: '12px',
+                  background: '#F1F5F9',
+                  border: '1px solid #E2E8F0',
+                  borderRadius: 8,
+                  fontWeight: 700,
+                  color: '#475569',
+                  cursor: 'pointer',
+                  transition: 'background 0.2s'
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = '#E2E8F0'}
+                onMouseLeave={e => e.currentTarget.style.background = '#F1F5F9'}
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const clientId = client.id;
+                  setSelectedRecommendationClient(null);
+                  navigate(`/clients/${clientId}`);
+                }}
+                style={{
+                  flex: 1.5,
+                  padding: '12px',
+                  background: '#0D9488',
+                  border: 'none',
+                  borderRadius: 8,
+                  fontWeight: 700,
+                  color: '#fff',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  transition: 'background 0.2s'
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = '#0F766E'}
+                onMouseLeave={e => e.currentTarget.style.background = '#0D9488'}
+              >
+                <i className="ti ti-external-link" style={{ fontSize: 16 }} />
+                View Full Profile
+              </button>
+            </div>
+
+          </div>
+        </div>
+      </div>,
+      document.body
+    );
+  };
+
   if (id) {
     const editingClient = clients.find(c => c.id === id);
     if (!editingClient) return <div>Client not found</div>;
@@ -271,10 +678,31 @@ export const ClientManagement: React.FC = () => {
       <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
             {/* Header Card */}
             <div style={{ background: '#0F172A', color: 'white', padding: '32px 24px', borderRadius: '12px' }}>
-              <p style={{ margin: '0 0 8px', fontSize: '0.75rem', fontWeight: 600, color: '#94A3B8', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Company Code</p>
-              <h2 style={{ margin: '0 0 16px', fontSize: '1.25rem', fontWeight: 700, color: 'white' }}>{editingClient.id} · {editingClient.name}</h2>
-              <div style={{ width: 'fit-content' }}>
-                <StatusBadge status={editingClient.status} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
+                <div>
+                  <p style={{ margin: '0 0 8px', fontSize: '0.75rem', fontWeight: 600, color: '#94A3B8', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Company Code</p>
+                  <h2 style={{ margin: '0 0 16px', fontSize: '1.25rem', fontWeight: 700, color: 'white' }}>{editingClient.id} · {editingClient.name}</h2>
+                  <div style={{ width: 'fit-content' }}>
+                    <StatusBadge status={editingClient.status} />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenRecommendation(editingClient, clientMetrics.get(editingClient.id))}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      background: '#0D9488', color: '#fff', border: 'none',
+                      padding: '10px 18px', borderRadius: 8, fontWeight: 700, fontSize: 13,
+                      cursor: 'pointer', transition: 'background 0.2s'
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = '#0F766E'}
+                    onMouseLeave={e => e.currentTarget.style.background = '#0D9488'}
+                  >
+                    <i className="ti ti-eye" /> VIEW
+                  </button>
+                  <Button variant="secondary" title="Back to Clients" onClick={() => navigate('/clients')} />
+                </div>
               </div>
             </div>
 
@@ -741,64 +1169,15 @@ export const ClientManagement: React.FC = () => {
           </div>,
           document.body
         )}
+        {renderRecommendationModal()}
       </div>
     );
   }
 
-  // --- List View ---
-  const tableColumns = [
-    {
-      key: 'name', label: 'CLIENT NAME', sortable: true, render: (row: Client) => (
-        <span style={{ color: '#0F172A', fontWeight: 700, textDecoration: 'none' }}>
-          {row.name}
-        </span>
-      )
-    },
-    {
-      key: 'id', label: 'CLIENT ID', sortable: true, render: (row: Client) => {
-        if (row.id && row.id.length > 15 && row.id.includes('-')) {
-          // Simple hash to create a short CA-XXX format for UUIDs to make it look clean
-          let hash = 0;
-          for (let i = 0; i < row.id.length; i++) {
-            hash = ((hash << 5) - hash) + row.id.charCodeAt(i);
-            hash |= 0;
-          }
-          const shortNum = Math.abs(hash) % 900 + 100;
-          return `CA-${shortNum}`;
-        }
-        return row.id;
-      }
-    },
-    {
-      key: 'status',
-      label: 'STATUS',
-      render: (row: Client) => (
-        <StatusBadge status={row.status} />
-      )
-    }
-  ];
-
-  const tableActions = [
-    { label: 'View Details', icon: 'ti-eye', onClick: (row: Client) => navigate(`/clients/${row.id}`) }
-  ];
-
-  const handleAddNew = () => {
-    setFormData({
-      name: '',
-      contactPerson: '',
-      contactNumber: '',
-      address: '',
-      rateType: 'Standard',
-      billingSchedule: 'Monthly',
-      status: 'Active'
-    });
-    setIsAddingNew(true);
-  };
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
 
-      {/* Modal for ADD NEW CLIENT ONLY */}
+      {/* Modal for ADD NEW CLIENT */}
       {isAddingNew && createPortal(
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
@@ -863,32 +1242,367 @@ export const ClientManagement: React.FC = () => {
         document.body
       )}
 
-      {/* Data Table */}
-      <TableContainer>
-        <DataTable
-          title="Client Accounts"
-          data={clients}
-          columns={tableColumns}
-          actions={tableActions}
-          rowKey="id"
-          emptyMessage="No clients found matching criteria."
-          searchPlaceholder="Search client name..."
-          searchFields={['name']}
-          filters={[
-            {
-              key: 'status',
-              label: 'Status',
-              options: [
-                { label: 'Active', value: 'Active' },
-                { label: 'Inactive', value: 'Inactive' }
-              ]
-            }
-          ]}
-          columnToggle={true}
-          densityToggle={true}
-          exportable={false}
-        />
-      </TableContainer>
+      {/* Main Container Styled Matching Picture 1 */}
+      <div style={{ background: '#fff', border: '1px solid #E2E8F0', borderRadius: 12, overflow: 'hidden' }}>
+        {/* Header & Filter Bar matching Picture 1 */}
+        <div style={{ padding: '20px 24px', borderBottom: '1px solid #E2E8F0', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h2 style={{ fontSize: 18, fontWeight: 800, color: '#111827', margin: 0 }}>
+              Client Accounts
+            </h2>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              {/* Add Client Button */}
+              <button
+                type="button"
+                onClick={handleAddNew}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  background: '#0D9488',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 8,
+                  padding: '8px 16px',
+                  fontWeight: 700,
+                  fontSize: 13,
+                  cursor: 'pointer',
+                  transition: 'background 0.2s'
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = '#0F766E'}
+                onMouseLeave={e => e.currentTarget.style.background = '#0D9488'}
+              >
+                <i className="ti ti-plus" style={{ fontSize: 15 }} />
+                New Client
+              </button>
+            </div>
+          </div>
+
+          {/* Search Input & Status Dropdown matching Picture 1 */}
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <div style={{ position: 'relative', width: '280px' }}>
+              <i className="ti ti-search" style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', color: '#0D9488', zIndex: 2, fontSize: 18, pointerEvents: 'none' }} />
+              <input
+                type="text"
+                placeholder="Search clients..."
+                value={searchQuery}
+                onFocus={() => setIsSearchFocused(true)}
+                onBlur={() => setTimeout(() => setIsSearchFocused(false), 200)}
+                onChange={e => setSearchQuery(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '10px 16px 10px 42px',
+                  border: '1px solid #0D9488',
+                  borderRadius: '9999px',
+                  fontSize: '0.9rem',
+                  outline: 'none',
+                  color: '#111827',
+                  boxSizing: 'border-box'
+                }}
+              />
+              {isSearchFocused && (
+                <div style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 8px)',
+                  left: 0,
+                  right: 0,
+                  background: '#fff',
+                  border: '1px solid #E2E8F0',
+                  borderRadius: '12px',
+                  boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06)',
+                  zIndex: 10,
+                  overflow: 'hidden'
+                }}>
+                  <div style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, color: '#6B7280', letterSpacing: '0.05em', borderBottom: '1px solid #F1F5F9' }}>
+                    RECENT SEARCHES
+                  </div>
+                  {recentSearches.map((term, idx) => (
+                    <div
+                      key={idx}
+                      onClick={() => { setSearchQuery(term); setIsSearchFocused(false); }}
+                      style={{
+                        padding: '10px 16px',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        cursor: 'pointer',
+                        transition: 'background 0.2s',
+                        color: '#111827',
+                        fontSize: '13px'
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = '#F8FAFC'}
+                      onMouseLeave={e => e.currentTarget.style.background = '#fff'}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <i className="ti ti-history" style={{ color: '#64748B', fontSize: 15 }} />
+                        <span style={{ fontWeight: 600 }}>{term}</span>
+                      </div>
+                      <span style={{ fontSize: 11, color: '#94A3B8' }}>Select</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <select
+              value={statusFilter}
+              onChange={e => setStatusFilter(e.target.value)}
+              style={{
+                padding: '10px 16px',
+                border: '1px solid #E2E8F0',
+                borderRadius: '8px',
+                fontSize: '0.9rem',
+                outline: 'none',
+                background: '#fff',
+                cursor: 'pointer',
+                color: '#111827'
+              }}
+            >
+              <option value="All">Status</option>
+              <option value="Active">Active</option>
+              <option value="Inactive">Inactive</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Content View: Card Grid */}
+        <div style={{ padding: 24 }}>
+          {filteredClients.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 48, color: '#9CA3AF', fontSize: 14 }}>
+                <i className="ti ti-search" style={{ fontSize: 40, display: 'block', marginBottom: 12 }} />
+                No matching client accounts found.
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 20 }}>
+                {filteredClients.map((client) => {
+                  const metrics = clientMetrics.get(client.id);
+                  const balance = metrics?.balance ?? 0;
+                  const overdueDays = metrics?.maxOverdueDays ?? 0;
+                  const dueDateDisplay = metrics?.displayDueDate || client.billingSchedule || 'Monthly';
+
+                  return (
+                    <div
+                      key={client.id}
+                      style={{
+                        background: '#fff',
+                        border: `1px solid ${metrics?.cardBorder || '#E2E8F0'}`,
+                        borderRadius: 12,
+                        padding: 24,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 16,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                        transition: 'all 0.2s ease',
+                      }}
+                      onMouseEnter={e => {
+                        e.currentTarget.style.boxShadow = '0 8px 24px rgba(0,0,0,0.08)';
+                        e.currentTarget.style.transform = 'translateY(-2px)';
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.05)';
+                        e.currentTarget.style.transform = 'translateY(0)';
+                      }}
+                    >
+                      {/* Top Row: Status (Active / Inactive) & Client ID */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        {client.status === 'Active' ? (
+                          <span
+                            style={{
+                              background: '#DCFCE7',
+                              color: '#16A34A',
+                              border: '1px solid #BBF7D0',
+                              padding: '4px 12px',
+                              borderRadius: '9999px',
+                              fontSize: '12px',
+                              fontWeight: 700,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 6
+                            }}
+                          >
+                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#16A34A' }} />
+                            Active
+                          </span>
+                        ) : (
+                          <span
+                            style={{
+                              background: '#F1F5F9',
+                              color: '#64748B',
+                              border: '1px solid #E2E8F0',
+                              padding: '4px 12px',
+                              borderRadius: '9999px',
+                              fontSize: '12px',
+                              fontWeight: 700,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 6
+                            }}
+                          >
+                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#94A3B8' }} />
+                            Inactive
+                          </span>
+                        )}
+
+                        <span
+                          style={{
+                            fontWeight: 800,
+                            fontSize: '14px',
+                            color: client.status === 'Active' ? '#0D9488' : '#64748B',
+                            letterSpacing: '0.02em'
+                          }}
+                        >
+                          {formatClientId(client.id)}
+                        </span>
+                      </div>
+
+                      {/* Title & Contact Subtitle */}
+                      <div>
+                        <div
+                          onClick={() => navigate(`/clients/${client.id}`)}
+                          style={{ fontWeight: 800, fontSize: 18, color: '#111827', lineHeight: 1.3, cursor: 'pointer' }}
+                          title="View Client Profile"
+                        >
+                          {client.name || 'Unknown Account'}
+                        </div>
+                        <div style={{ fontSize: 13, color: '#9CA3AF', marginTop: 4 }}>
+                          {client.contactPerson ? client.contactPerson : (client.phone || '—')}
+                        </div>
+                      </div>
+
+                      {/* Details Row: 2 columns (matching OUTSTANDING BALANCE / DUE DATE in Picture 1) */}
+                      <div style={{ display: 'flex', gap: 40, marginTop: 4 }}>
+                        <div>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: '#6B7280', letterSpacing: '0.05em' }}>
+                            OUTSTANDING BALANCE
+                          </div>
+                          <div style={{ fontWeight: 800, fontSize: 16, color: '#111827', marginTop: 4 }}>
+                            ₱{balance.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: '#6B7280', letterSpacing: '0.05em' }}>
+                            {metrics?.displayDueDate ? 'DUE DATE' : 'BILLING CYCLE'}
+                          </div>
+                          <div style={{ fontWeight: 800, fontSize: 14, color: '#111827', marginTop: 4 }}>
+                            {dueDateDisplay}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Overdue / Good Standing Badge */}
+                      {overdueDays > 0 ? (
+                        <div style={{ marginTop: 4 }}>
+                          <div
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              background: '#FEF2F2',
+                              border: '1px solid #FECACA',
+                              color: '#DC2626',
+                              padding: '6px 12px',
+                              borderRadius: 8,
+                              fontSize: 12,
+                              fontWeight: 700
+                            }}
+                          >
+                            <i className="ti ti-clock" style={{ fontSize: 14 }} />
+                            {overdueDays} Days Overdue
+                          </div>
+                        </div>
+                      ) : client.status === 'Active' ? (
+                        <div style={{ marginTop: 4 }}>
+                          <div
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              background: '#F0FDF4',
+                              border: '1px solid #BBF7D0',
+                              color: '#16A34A',
+                              padding: '6px 12px',
+                              borderRadius: 8,
+                              fontSize: 12,
+                              fontWeight: 700
+                            }}
+                          >
+                            <i className="ti ti-circle-check" style={{ fontSize: 14 }} />
+                            Good Standing
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ marginTop: 4 }}>
+                          <div
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              background: '#F8FAFC',
+                              border: '1px solid #E2E8F0',
+                              color: '#64748B',
+                              padding: '6px 12px',
+                              borderRadius: 8,
+                              fontSize: 12,
+                              fontWeight: 700
+                            }}
+                          >
+                            <i className="ti ti-ban" style={{ fontSize: 14 }} />
+                            Inactive Account
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Client Details Preview */}
+                      <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: '#64748B' }}>
+                        {client.phone && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <i className="ti ti-phone" style={{ fontSize: 14, color: '#0D9488' }} />
+                            <span>{client.phone}</span>
+                          </div>
+                        )}
+                        {client.address && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <i className="ti ti-map-pin" style={{ fontSize: 14, color: '#0D9488', flexShrink: 0 }} />
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{client.address}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Bottom Button (solid teal matching Picture 1) */}
+                      <div style={{ marginTop: 'auto', paddingTop: 8 }}>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenRecommendation(client, metrics)}
+                          style={{
+                            width: '100%',
+                            padding: '12px 0',
+                            background: '#0D9488',
+                            color: '#fff',
+                            border: 'none',
+                            borderRadius: 8,
+                            fontWeight: 700,
+                            fontSize: 13,
+                            cursor: 'pointer',
+                            transition: 'background 0.2s',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 8
+                          }}
+                          onMouseEnter={e => e.currentTarget.style.background = '#0F766E'}
+                          onMouseLeave={e => e.currentTarget.style.background = '#0D9488'}
+                        >
+                          VIEW
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+        </div>
+      </div>
+      {renderRecommendationModal()}
     </div>
   );
 };

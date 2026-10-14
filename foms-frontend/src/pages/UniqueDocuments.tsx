@@ -4,7 +4,6 @@ import { useUniqueDocuments } from '../hooks/useDuplicates';
 import { DataTable, type Column } from '../components/shared/DataTable';
 import FilterBar from '../components/shared/FilterBar';
 import StatusBadge from '../components/shared/StatusBadge';
-import { PageHeader } from '../components/shared/PageHeader';
 import Button from '../components/Buttons';
 import type { UniqueDocumentItem } from '../services/duplicates.service';
 
@@ -148,17 +147,6 @@ const UniqueDocuments: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <PageHeader
-        title="Unique Documents"
-        subtitle={
-          scope === 'liquidation'
-            ? 'Verified unique documents for liquidation expenses and driver reimbursements.'
-            : scope === 'own'
-            ? 'Verified unique documents within your accounting portfolio scope.'
-            : 'All system-verified unique financial and billing documents.'
-        }
-      />
-
       {scope === 'liquidation' && (
         <div style={{ padding: '8px 14px', background: '#F0F9FF', border: '1px solid #BAE6FD', borderRadius: '8px', fontSize: '0.8rem', color: '#0369A1', fontWeight: 600 }}>
           <i className="ti ti-filter" style={{ marginRight: 6 }} />

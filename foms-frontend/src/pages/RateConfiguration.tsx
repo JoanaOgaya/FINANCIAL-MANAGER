@@ -259,7 +259,7 @@ export const RateConfiguration: React.FC = () => {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       <TableContainer>
         <DataTable
-          title="Client Billing Configurations"
+          title=""
           data={groupedClients}
           columns={tableColumns}
           rowKey="id"

@@ -484,5 +484,41 @@ export interface DashboardSummary {
   recentActivity: AuditLog[];
 }
 
+export interface FinanceManagerDashboardSummary {
+  asOf: string;
+  period: 'weekly' | 'monthly';
+  clientId?: string;
+  totalInvoicesBilled: number;
+  totalInvoiceAmount: number;
+  totalCollected: number;
+  totalArOutstanding: number;
+  collectionRate: number;
+  cashInflowThisMonth: number;
+  duplicateAlerts: number;
+  accountsNearDueDate: number;
+  cashFlowAnalytics: { period: string; inflow: number; outflow: number; net: number }[];
+  agingBuckets: { label: string; value: number }[];
+  topPayingClients: { clientId: string; clientName: string; amount: number }[];
+  nearDueAccounts: {
+    clientId: string;
+    clientName: string;
+    invoiceNumber: string;
+    amountDue: number;
+    dueDate: string;
+    daysRemaining: number;
+  }[];
+  recentActivity: AuditLog[];
+  insights: {
+    id: string;
+    type: 'collection' | 'duplicate' | 'liquidation';
+    title: string;
+    message: string;
+    severity: 'low' | 'medium' | 'high' | 'critical';
+    entityId?: string;
+    targetRoute: string;
+    createdAt: string;
+  }[];
+}
+
 /** Sidebar badge counts keyed by module key (e.g. { invoiceReview: 4 }). */
 export type NavBadges = Record<string, number>;

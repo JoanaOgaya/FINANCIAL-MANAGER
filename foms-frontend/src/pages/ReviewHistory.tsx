@@ -5,7 +5,6 @@ import { canDo } from '../utils/roleAccess';
 import { DataTable, type Column } from '../components/shared/DataTable';
 import FilterBar from '../components/shared/FilterBar';
 import StatusBadge from '../components/shared/StatusBadge';
-import { PageHeader } from '../components/shared/PageHeader';
 import Button from '../components/Buttons';
 import type { ReviewHistoryItem } from '../services/duplicates.service';
 
@@ -150,17 +149,6 @@ const ReviewHistory: React.FC = () => {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
-        <PageHeader
-          title="Review History"
-          subtitle={
-            scope === 'liquidation'
-              ? 'Audit log of reviewed liquidation duplicates and reimbursable claims.'
-              : scope === 'own'
-              ? 'Audit log of duplicate resolutions for your assigned accounts.'
-              : 'Complete organizational audit trail of duplicate detection decisions.'
-          }
-        />
-
         {canExport && (
           <Button
             title={`Export ${scope === 'all' ? 'All' : scope === 'liquidation' ? 'Liquidation' : 'My Scope'} CSV`}
