@@ -1,57 +1,63 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { DataTable, type Column } from '../components/shared/DataTable';
 import FilterBar from '../components/shared/FilterBar';
 import Button from '../components/Buttons';
 import { AiDisclaimer } from '../components/ai/AiDisclaimer';
 import { AiErrorBoundary } from '../components/ai/ErrorBoundary';
 import { aiOutputsService } from '../services/ai/aiOutputs.service';
 import { getDuplicateScope, canDo } from '../utils/roleAccess';
+import { useQuery } from '../hooks/useQuery';
 import type { AiOutputRecord } from '../types/ai';
+
+const getModuleBadge = (mod: string) => {
+  const m = (mod || '').toLowerCase();
+  if (m.includes('dup')) return { label: 'DUPLICATE', bg: '#EFF6FF', color: '#2563EB', border: '#BFDBFE', icon: 'ti-copy' };
+  if (m.includes('risk')) return { label: 'RISK', bg: '#FEF2F2', color: '#DC2626', border: '#FECACA', icon: 'ti-alert-triangle' };
+  if (m.includes('coll')) return { label: 'COLLECTION', bg: '#F0FDF4', color: '#16A34A', border: '#BBF7D0', icon: 'ti-cash' };
+  if (m.includes('doc')) return { label: 'DOCUMENT', bg: '#FAF5FF', color: '#9333EA', border: '#E9D5FF', icon: 'ti-file-text' };
+  return { label: (mod || 'AI').toUpperCase(), bg: '#F1F5F9', color: '#475569', border: '#E2E8F0', icon: 'ti-cpu' };
+};
+
+const getDecisionBadge = (decision?: string) => {
+  const d = (decision || '').toLowerCase();
+  if (d.includes('unique') || d.includes('verified')) {
+    return { bg: '#ECFDF5', color: '#059669', border: '#A7F3D0', icon: 'ti-check' };
+  }
+  if (d.includes('flag') || d.includes('dup') || d.includes('reject')) {
+    return { bg: '#FEF2F2', color: '#DC2626', border: '#FECACA', icon: 'ti-alert-circle' };
+  }
+  return { bg: '#FFFBEB', color: '#D97706', border: '#FDE68A', icon: 'ti-clock' };
+};
 
 export const AIOutputHistory: React.FC = () => {
   const { user } = useAuth();
   const scope = getDuplicateScope(user?.role);
   const canExport = canDo(user?.role, 'aiHistory', 'export');
 
-  const [items, setItems] = useState<AiOutputRecord[]>([]);
-  const [total, setTotal] = useState(0);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
-
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(9);
   const [search, setSearch] = useState('');
   const [moduleFilter, setModuleFilter] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [selectedRecord, setSelectedRecord] = useState<AiOutputRecord | null>(null);
 
-  const fetchRecords = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const res = await aiOutputsService.list({
+  const queryKey = `aiOutputs:${scope}:${page}:${pageSize}:${search}:${moduleFilter}:${dateFrom}`;
+  const { data: aiData, isLoading, error, refetch } = useQuery(
+    queryKey,
+    () =>
+      aiOutputsService.list({
         page,
         pageSize,
         search: search || undefined,
         module: moduleFilter || undefined,
         dateFrom: dateFrom || undefined,
         scope,
-      });
-      setItems(res.items || []);
-      setTotal(res.total || 0);
-    } catch (err: any) {
-      setError(err instanceof Error ? err : new Error('Failed to load AI output records.'));
-      setItems([]);
-      setTotal(0);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [page, pageSize, search, moduleFilter, dateFrom, scope]);
+      }),
+    { enabled: !!user },
+  );
 
-  useEffect(() => {
-    fetchRecords();
-  }, [fetchRecords]);
+  const items = aiData?.items || [];
+  const total = aiData?.total || 0;
 
   const handleExport = () => {
     if (!canExport || items.length === 0) return;
@@ -80,96 +86,6 @@ export const AIOutputHistory: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  const columns: Column<AiOutputRecord>[] = [
-    {
-      key: 'id',
-      label: 'RECORD ID',
-      render: (row) => <span style={{ fontWeight: 700, color: '#0F172A' }}>{row.id}</span>,
-    },
-    {
-      key: 'module',
-      label: 'AI MODULE',
-      render: (row) => (
-        <span
-          style={{
-            fontSize: '0.75rem',
-            fontWeight: 800,
-            textTransform: 'uppercase',
-            padding: '2px 8px',
-            borderRadius: 4,
-            background: '#F1F5F9',
-            color: '#334155',
-          }}
-        >
-          {row.module}
-        </span>
-      ),
-    },
-    {
-      key: 'documentNumber',
-      label: 'LINKED ENTITY',
-      render: (row) => (
-        <div>
-          {row.linkUrl ? (
-            <a
-              href={row.linkUrl}
-              style={{ fontWeight: 700, color: '#0D9488', textDecoration: 'none' }}
-              title="Click to navigate to official record"
-            >
-              {row.documentNumber || row.entityId} ↗
-            </a>
-          ) : (
-            <span style={{ fontWeight: 700, color: '#0F172A' }}>{row.documentNumber || row.entityId}</span>
-          )}
-          {row.clientName && (
-            <div style={{ fontSize: '0.75rem', color: '#64748B' }}>{row.clientName}</div>
-          )}
-        </div>
-      ),
-    },
-    {
-      key: 'outputSummary',
-      label: 'AI INTELLIGENCE OUTPUT',
-      render: (row) => (
-        <span style={{ fontSize: '0.85rem', color: '#334155' }} title={row.outputSummary}>
-          {row.outputSummary}
-        </span>
-      ),
-    },
-    {
-      key: 'score',
-      label: 'SCORE / RATING',
-      render: (row) => (
-        <span style={{ fontWeight: 700, color: '#0F172A' }}>
-          {row.score !== undefined ? `${row.score}%` : row.level || 'N/A'}
-        </span>
-      ),
-    },
-    {
-      key: 'reviewer',
-      label: 'VALIDATION STATUS',
-      render: (row) => (
-        <div>
-          <span style={{ fontWeight: 600, color: row.reviewDecision ? '#16A34A' : '#D97706', fontSize: '0.8rem' }}>
-            {row.reviewDecision || 'Pending Validation'}
-          </span>
-          {row.reviewer && (
-            <div style={{ fontSize: '0.75rem', color: '#64748B' }}>by {row.reviewer}</div>
-          )}
-        </div>
-      ),
-    },
-    {
-      key: 'createdAt',
-      label: 'TIMESTAMP',
-      render: (row) => (
-        <span style={{ color: '#64748B', fontSize: '0.8rem' }}>
-          {new Date(row.createdAt).toLocaleDateString('en-PH')}
-        </span>
-      ),
-    },
-  ];
-
   const filterFields = [
     {
       key: 'module',
@@ -189,9 +105,12 @@ export const AIOutputHistory: React.FC = () => {
     },
   ];
 
+  const totalPages = Math.ceil(total / pageSize) || 1;
+
   return (
     <AiErrorBoundary>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+        {/* Top Action Bar */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
             <AiDisclaimer />
@@ -208,6 +127,7 @@ export const AIOutputHistory: React.FC = () => {
           </div>
         </div>
 
+        {/* Search & Filter Bar */}
         <FilterBar
           searchValue={search}
           onSearchChange={setSearch}
@@ -218,7 +138,7 @@ export const AIOutputHistory: React.FC = () => {
             if (k === 'module') setModuleFilter(v);
             if (k === 'dateFrom') setDateFrom(v);
           }}
-          onApply={fetchRecords}
+          onApply={refetch}
           onReset={() => {
             setSearch('');
             setModuleFilter('');
@@ -226,27 +146,243 @@ export const AIOutputHistory: React.FC = () => {
           }}
         />
 
-        <DataTable
-          rows={items}
-          columns={columns}
-          rowKey={(r) => r.id}
-          total={total}
-          page={page}
-          pageSize={pageSize}
-          onPageChange={setPage}
-          isLoading={isLoading}
-          error={error}
-          onRetry={fetchRecords}
-          emptyMessage="No AI output history records found."
-          renderActions={(row) => (
-            <Button
-              title="Inspect"
-              variant="secondary"
-              size="sm"
-              onClick={() => setSelectedRecord(row)}
-            />
-          )}
-        />
+        {/* Error state */}
+        {error && (
+          <div style={{ padding: '16px 20px', background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 12, color: '#991B1B', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <strong>Error loading AI outputs:</strong> {error.message || 'Unknown error'}
+            </div>
+            <button onClick={() => refetch()} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#EF4444', color: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}>
+              Retry
+            </button>
+          </div>
+        )}
+
+        {/* Loading state */}
+        {isLoading && (
+          <div style={{ textAlign: 'center', padding: '60px 20px', color: '#64748B' }}>
+            <i className="ti ti-loader-2 ti-spin" style={{ fontSize: 32, color: '#0D9488', marginBottom: 12 }} />
+            <div style={{ fontWeight: 600 }}>Loading AI outputs...</div>
+          </div>
+        )}
+
+        {/* Empty State */}
+        {!isLoading && !error && items.length === 0 && (
+          <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #E2E8F0', padding: '60px 20px', textAlign: 'center' }}>
+            <div style={{ width: 56, height: 56, borderRadius: '50%', background: '#F1F5F9', color: '#94A3B8', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', fontSize: 28 }}>
+              <i className="ti ti-robot" />
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: '#0F172A', marginBottom: 6 }}>No AI output records found</div>
+            <p style={{ margin: 0, fontSize: 13, color: '#64748B' }}>
+              No intelligence logs match your search or filter criteria.
+            </p>
+          </div>
+        )}
+
+        {/* Table View */}
+        {!isLoading && !error && items.length > 0 && (
+          <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #E2E8F0', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', minWidth: 960, borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.86rem' }}>
+                <thead>
+                  <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
+                    <th style={{ padding: '12px 18px', fontSize: '0.72rem', fontWeight: 800, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em' }}>AI Record ID</th>
+                    <th style={{ padding: '12px 18px', fontSize: '0.72rem', fontWeight: 800, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Document / Entity</th>
+                    <th style={{ padding: '12px 18px', fontSize: '0.72rem', fontWeight: 800, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Score / Level</th>
+                    <th style={{ padding: '12px 18px', fontSize: '0.72rem', fontWeight: 800, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em' }}>AI Output Summary</th>
+                    <th style={{ padding: '12px 18px', fontSize: '0.72rem', fontWeight: 800, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Review Decision</th>
+                    <th style={{ padding: '12px 18px', fontSize: '0.72rem', fontWeight: 800, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Date Recorded</th>
+                    <th style={{ padding: '12px 18px', fontSize: '0.72rem', fontWeight: 800, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'right' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((row) => {
+                    const modBadge = getModuleBadge(row.module);
+                    const decBadge = getDecisionBadge(row.reviewDecision);
+                    return (
+                      <tr
+                        key={row.id}
+                        style={{ borderBottom: '1px solid #F1F5F9', transition: 'background 0.15s' }}
+                        onMouseEnter={e => (e.currentTarget.style.background = '#F8FAFC')}
+                        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                      >
+                        <td style={{ padding: '14px 18px', whiteSpace: 'nowrap' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            <span style={{ fontSize: 13, fontWeight: 800, color: '#0F172A', fontFamily: 'monospace' }}>
+                              {row.id}
+                            </span>
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              padding: '2px 7px',
+                              borderRadius: 5,
+                              fontSize: 10,
+                              fontWeight: 700,
+                              background: modBadge.bg,
+                              color: modBadge.color,
+                              border: `1px solid ${modBadge.border}`,
+                              width: 'fit-content'
+                            }}>
+                              <i className={`ti ${modBadge.icon}`} style={{ fontSize: 10 }} />
+                              {modBadge.label}
+                            </span>
+                          </div>
+                        </td>
+                        <td style={{ padding: '14px 18px', whiteSpace: 'nowrap' }}>
+                          <div>
+                            {row.linkUrl ? (
+                              <a
+                                href={row.linkUrl}
+                                style={{ fontSize: 13, fontWeight: 800, color: '#0D9488', textDecoration: 'none' }}
+                                title="Click to navigate to official record"
+                              >
+                                {row.documentNumber || row.entityId} ↗
+                              </a>
+                            ) : (
+                              <span style={{ fontSize: 13, fontWeight: 800, color: '#0F172A' }}>
+                                {row.documentNumber || row.entityId}
+                              </span>
+                            )}
+                            {row.clientName && (
+                              <div style={{ fontSize: 12, color: '#64748B', fontWeight: 600, marginTop: 2 }}>
+                                {row.clientName}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        <td style={{ padding: '14px 18px', whiteSpace: 'nowrap' }}>
+                          <span style={{
+                            fontSize: 12,
+                            fontWeight: 800,
+                            color: '#0F172A',
+                            padding: '3px 8px',
+                            borderRadius: 6,
+                            background: '#F1F5F9',
+                            border: '1px solid #E2E8F0'
+                          }}>
+                            {row.score !== undefined ? `${row.score}%` : row.level || 'N/A'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '14px 18px', maxWidth: 340 }}>
+                          <span style={{
+                            fontSize: 12,
+                            color: '#334155',
+                            lineHeight: 1.45,
+                            display: '-webkit-box',
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden'
+                          }} title={row.outputSummary}>
+                            {row.outputSummary}
+                          </span>
+                        </td>
+                        <td style={{ padding: '14px 18px', whiteSpace: 'nowrap' }}>
+                          <div>
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              padding: '2px 8px',
+                              borderRadius: 999,
+                              fontSize: 11,
+                              fontWeight: 700,
+                              background: decBadge.bg,
+                              color: decBadge.color,
+                              border: `1px solid ${decBadge.border}`
+                            }}>
+                              <i className={`ti ${decBadge.icon}`} style={{ fontSize: 11 }} />
+                              {row.reviewDecision || 'Pending Validation'}
+                            </span>
+                            {row.reviewer && (
+                              <div style={{ fontSize: 11, color: '#64748B', marginTop: 3 }}>
+                                by {row.reviewer}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        <td style={{ padding: '14px 18px', whiteSpace: 'nowrap', fontSize: 12, color: '#64748B' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                            <i className="ti ti-calendar" style={{ color: '#0D9488' }} />
+                            <span>{new Date(row.createdAt).toLocaleDateString('en-PH')}</span>
+                          </div>
+                        </td>
+                        <td style={{ padding: '14px 18px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          <Button
+                            title="Inspect"
+                            variant="secondary"
+                            size="sm"
+                            icon="ti ti-eye"
+                            onClick={() => setSelectedRecord(row)}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Pagination Footer */}
+        {!isLoading && !error && total > 0 && (
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '16px 20px',
+            background: '#fff',
+            borderRadius: 12,
+            border: '1px solid #E2E8F0',
+            flexWrap: 'wrap',
+            gap: 12
+          }}>
+            <div style={{ fontSize: 13, color: '#64748B' }}>
+              Showing {Math.min((page - 1) * pageSize + 1, total)}–{Math.min(page * pageSize, total)} of {total} records
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button
+                disabled={page <= 1}
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: 8,
+                  border: '1px solid #E2E8F0',
+                  background: page <= 1 ? '#F8FAFC' : '#fff',
+                  color: page <= 1 ? '#94A3B8' : '#0F172A',
+                  cursor: page <= 1 ? 'not-allowed' : 'pointer',
+                  fontWeight: 600,
+                  fontSize: 13
+                }}
+              >
+                Previous
+              </button>
+
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#0F172A', padding: '0 8px' }}>
+                Page {page} of {totalPages}
+              </span>
+
+              <button
+                disabled={page >= totalPages}
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: 8,
+                  border: '1px solid #E2E8F0',
+                  background: page >= totalPages ? '#F8FAFC' : '#fff',
+                  color: page >= totalPages ? '#94A3B8' : '#0F172A',
+                  cursor: page >= totalPages ? 'not-allowed' : 'pointer',
+                  fontWeight: 600,
+                  fontSize: 13
+                }}
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Modal for detail inspection */}
         {selectedRecord && (

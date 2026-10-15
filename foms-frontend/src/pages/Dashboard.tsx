@@ -117,7 +117,7 @@ const AsstFinanceDashboard: React.FC = () => {
         cta={{ label: 'Liquidation Reports', icon: 'ti-cash', onClick: () => navigate('/liquidations') }}
         secondaryCta={{ label: 'SpeedPay Validation', onClick: () => navigate('/speedpay-validation') }}
       />
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
+      <div className="kpi-grid">
         <KpiCard label="Total Cash Inflows" value={formatCurrency(totalCashInflow)} icon="ti-arrow-down-right" variant="success" periodText="Overall Inflows" />
         <KpiCard label="Total Cash Outflows" value={formatCurrency(totalCashOutflow)} icon="ti-arrow-up-right" variant="danger" periodText="Overall Outflows" />
         <KpiCard label="Net Cash Balance" value={formatCurrency(totalNetCash)} icon="ti-wallet" variant={totalNetCash >= 0 ? "new" : "danger"} periodText="Current Balance" />
@@ -288,7 +288,7 @@ const FinanceManagerDashboard: React.FC = () => {
         icon="ti-building-bank"
       />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
+        <div className="kpi-grid">
           <KpiCard label="Total Invoices Billed" value={summary.totalInvoicesBilled} icon="ti-file-invoice" variant="new" periodText={`Total: ${formatCurrency(summary.totalInvoiceAmount)}`} />
           <KpiCard label="Total AR Outstanding" value={formatCurrency(summary.totalArOutstanding)} icon="ti-report-money" variant="warning" />
           <KpiCard label="Collection Rate" value={`${summary.collectionRate.toFixed(1)}%`} icon="ti-chart-pie" variant="info" periodText={`Collected: ${formatCurrency(summary.totalCollected)}`} />

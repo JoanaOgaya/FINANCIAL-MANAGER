@@ -20,6 +20,8 @@ export interface KpiCardProps {
   polarity?: 'higher-is-better' | 'lower-is-better';
   loading?: boolean;
   onClick?: () => void;
+  hideTrend?: boolean;
+  description?: React.ReactNode;
 }
 
 const variantColors: Record<string, { accent: string; bg: string }> = {
@@ -39,7 +41,7 @@ function resolveTrend(trend: KpiCardProps['trend']): { type: TrendType; text: st
 }
 
 export const KpiCard: React.FC<KpiCardProps> = ({
-  label, value, icon, variant = 'teal', trend, periodText = 'vs prev.', polarity = 'higher-is-better', loading = false, onClick,
+  label, value, icon, variant = 'teal', trend, periodText = 'vs prev.', polarity = 'higher-is-better', loading = false, onClick, hideTrend = false, description,
 }) => {
   const colors = variantColors[variant] || variantColors.teal;
   const t = resolveTrend(trend);
@@ -50,7 +52,9 @@ export const KpiCard: React.FC<KpiCardProps> = ({
     '--kpi-ic': colors.accent,
     cursor: onClick ? 'pointer' : 'default',
     userSelect: 'none',
-    padding: '16px',
+    boxSizing: 'border-box',
+    minHeight: 98,
+    padding: '14px 16px',
   } as React.CSSProperties;
 
   const trendClass =
@@ -88,13 +92,17 @@ export const KpiCard: React.FC<KpiCardProps> = ({
         )}
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
           <span className="kpi-label" style={{ fontSize: '0.7rem', fontWeight: 600, color: '#475569', marginBottom: '4px', display: 'block', lineHeight: 1.2, textTransform: 'uppercase' }}>{label}</span>
-          <div className="kpi-val" style={{ fontSize: '1.15rem', fontWeight: 800, color: '#0F172A', marginBottom: '8px', lineHeight: 1 }}>{value}</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap', marginTop: 'auto' }}>
-            <div className={`kpi-trend ${trendClass}`} style={{ display: 'flex', alignItems: 'center', gap: '2px', fontWeight: 600, fontSize: '0.7rem' }}>
-              <span>{trendIcon} {t.text}</span>
+          <div className="kpi-val" style={{ fontSize: 'clamp(1rem, 1.35vw, 1.25rem)', fontWeight: 800, color: '#0F172A', marginBottom: '8px', lineHeight: 1.1, overflowWrap: 'anywhere' }}>{value}</div>
+          {description !== undefined ? (
+            <div style={{ marginTop: 'auto', fontSize: '0.7rem', fontWeight: 600, color: '#64748B', lineHeight: 1.25 }}>{description}</div>
+          ) : !hideTrend && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap', marginTop: 'auto' }}>
+              <div className={`kpi-trend ${trendClass}`} style={{ display: 'flex', alignItems: 'center', gap: '2px', fontWeight: 600, fontSize: '0.7rem' }}>
+                <span>{trendIcon} {t.text}</span>
+              </div>
+              <span className="kpi-period" style={{ fontSize: '0.65rem', color: '#94A3B8', whiteSpace: 'nowrap' }}>{periodText}</span>
             </div>
-            <span className="kpi-period" style={{ fontSize: '0.65rem', color: '#94A3B8', whiteSpace: 'nowrap' }}>{periodText}</span>
-          </div>
+          )}
         </div>
       </div>
     </div>

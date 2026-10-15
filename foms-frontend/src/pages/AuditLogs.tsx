@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useQuery } from '../hooks/useQuery';
 import { auditLogsService } from '../services/auditLogsService';
 import type { AuditLog } from '../types/entities';
+import { KpiCard } from '../components/shared/KpiCard';
 import { CalendarPicker } from '../components/FormModals';
 import '../components/FormModals.css';
 
@@ -49,19 +50,6 @@ const EVENT_COLOR: Record<string, string> = {
   PAYMENT_PROCESSED:                   '#059669',
 };
 const eventColor = (a: string) => EVENT_COLOR[a] ?? '#0D9488';
-
-/* ─── KPI Card ─── */
-const KpiCard: React.FC<{ label: string; value: number; icon: string; iconColor: string; iconBg: string }> = ({ label, value, icon, iconColor, iconBg }) => (
-  <div style={{ background: '#fff', borderRadius: 12, padding: '18px 20px', border: '1px solid #E2E8F0', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', display: 'flex', flexDirection: 'column', gap: 10, flex: '1 1 160px', minWidth: 140 }}>
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-      <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</span>
-      <div style={{ width: 32, height: 32, borderRadius: 8, background: iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <i className={`ti ${icon}`} style={{ fontSize: '1rem', color: iconColor }} />
-      </div>
-    </div>
-    <span style={{ fontSize: '1.8rem', fontWeight: 800, color: '#0F172A', lineHeight: 1 }}>{value}</span>
-  </div>
-);
 
 /* ─── Row Action Menu ─── */
 const RowMenu: React.FC<{ onView: () => void }> = ({ onView }) => {
@@ -115,20 +103,9 @@ export const AuditLogs: React.FC = () => {
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [page, setPage] = useState(1);
 
-  useEffect(() => {
-    const saved = localStorage.getItem('auditLogs_recentSearches');
-    if (saved) {
-      try { setRecentSearches(JSON.parse(saved)); } catch (e) {}
-    }
-  }, []);
-
   const saveRecentSearch = (term: string) => {
     if (!term.trim()) return;
-    setRecentSearches(prev => {
-      const updated = [term.trim(), ...prev.filter(t => t.toLowerCase() !== term.trim().toLowerCase())].slice(0, 5);
-      localStorage.setItem('auditLogs_recentSearches', JSON.stringify(updated));
-      return updated;
-    });
+    setRecentSearches(prev => [term.trim(), ...prev.filter(t => t.toLowerCase() !== term.trim().toLowerCase())].slice(0, 5));
   };
 
   const handleSearchBlur = () => {
@@ -196,12 +173,12 @@ export const AuditLogs: React.FC = () => {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
       {/* ── KPI Row ── */}
-      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-        <KpiCard label="Total Audit Events"   value={totalEvents} icon="ti-file-description" iconColor="#0D9488" iconBg="#F0FDFA" />
-        <KpiCard label="User Login Activity"  value={loginEvents} icon="ti-login"            iconColor="#2563EB" iconBg="#EFF6FF" />
-        <KpiCard label="Duplicate Checks"     value={dupChecks}   icon="ti-copy"             iconColor="#D97706" iconBg="#FFFBEB" />
-        <KpiCard label="Collection Events"    value={collEvents}  icon="ti-trending-up"      iconColor="#7C3AED" iconBg="#F5F3FF" />
-        <KpiCard label="Failed Auth Attempts" value={failedAuth}  icon="ti-shield-x"         iconColor="#DC2626" iconBg="#FEF2F2" />
+      <div className="kpi-grid">
+        <KpiCard label="Total Audit Events" value={totalEvents} icon="ti-file-description" variant="teal" hideTrend />
+        <KpiCard label="User Login Activity" value={loginEvents} icon="ti-login" variant="info" hideTrend />
+        <KpiCard label="Duplicate Checks" value={dupChecks} icon="ti-copy" variant="warning" hideTrend />
+        <KpiCard label="Collection Events" value={collEvents} icon="ti-trending-up" variant="new" hideTrend />
+        <KpiCard label="Failed Auth Attempts" value={failedAuth} icon="ti-shield-x" variant="danger" hideTrend />
       </div>
 
       {/* ── Audit Trail Card ── */}
@@ -321,110 +298,146 @@ export const AuditLogs: React.FC = () => {
           )}
         </div>
 
-        {/* ── Table ── */}
-        <div style={{ overflowX: 'auto', border: '1px solid #E2E8F0', borderRadius: '8px' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-            <thead>
-              <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
-                {[
-                  { key: 'timestamp',    label: 'DATE & TIME' },
-                  { key: 'userFullName', label: 'USER' },
-                  { key: 'userRole',     label: 'ROLE' },
-                  { key: 'action',       label: 'EVENT TYPE' },
-                  { key: '_actionLabel', label: 'ACTION' },
-                  { key: 'recordId',     label: 'RELATED RECORD' },
-                  { key: '_result',      label: 'RESULT' },
-                ].map(col => (
-                  <th key={col.key}
-                    onClick={() => !col.key.startsWith('_') && toggleSort(col.key)}
-                    style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 700, fontSize: '0.72rem', color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap', cursor: col.key.startsWith('_') ? 'default' : 'pointer', userSelect: 'none' }}>
-                    {col.label}
-                    {!col.key.startsWith('_') && <SortIcon col={col.key} />}
-                  </th>
-                ))}
-                <th style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 700, fontSize: '0.72rem', color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em' }}>ACTIONS</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={8} style={{ padding: '48px 24px', textAlign: 'center', color: '#94A3B8' }}>
-                    <i className="ti ti-database-off" style={{ fontSize: 32, display: 'block', marginBottom: 8 }} />
-                    No audit events found
-                  </td>
-                </tr>
-              ) : paged.map((log, i) => {
-                const color = eventColor(log.action);
-                const success = isSuccess(log.action);
-                return (
-                  <tr key={log.id}
-                    style={{ borderBottom: '1px solid #F1F5F9', background: i % 2 === 0 ? '#fff' : '#FAFAFA', transition: 'background 0.15s' }}
-                    onMouseEnter={e => (e.currentTarget.style.background = '#F0FDFA')}
-                    onMouseLeave={e => (e.currentTarget.style.background = i % 2 === 0 ? '#fff' : '#FAFAFA')}>
-
-                    {/* DATE & TIME */}
-                    <td style={{ padding: '11px 16px', color: '#475569', whiteSpace: 'nowrap', fontSize: '0.82rem' }}>
-                      {fmtDate(log.timestamp)}
-                    </td>
-
-                    {/* USER */}
-                    <td style={{ padding: '11px 16px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#E0F2FE', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                          <i className="ti ti-user" style={{ fontSize: 13, color: '#0284C7' }} />
-                        </div>
-                        <span style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 500, color: '#0F172A' }}>
-                          {log.userFullName}
-                        </span>
-                      </div>
-                    </td>
-
-                    {/* ROLE */}
-                    <td style={{ padding: '11px 16px', color: '#64748B', whiteSpace: 'nowrap', fontSize: '0.82rem' }}>
-                      {log.userRole}
-                    </td>
-
-                    {/* EVENT TYPE */}
-                    <td style={{ padding: '11px 16px' }}>
-                      <span style={{ color, fontWeight: 700, fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
-                        {log.action.length > 26 ? log.action.slice(0, 26) + '…' : log.action}
-                      </span>
-                    </td>
-
-                    {/* ACTION — human-readable */}
-                    <td style={{ padding: '11px 16px', color: '#334155', fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
-                      {actionLabel(log.action)}
-                    </td>
-
-                    {/* RELATED RECORD */}
-                    <td style={{ padding: '11px 16px', color: log.recordId ? '#475569' : '#CBD5E1', fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
-                      {log.recordId || '—'}
-                    </td>
-
-                    {/* RESULT badge */}
-                    <td style={{ padding: '11px 16px' }}>
-                      <span style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 5,
-                        padding: '3px 10px', borderRadius: 999, fontSize: '0.75rem', fontWeight: 700,
-                        background: success ? '#ECFDF5' : '#FEF2F2',
-                        color:      success ? '#059669' : '#DC2626',
-                        border: `1px solid ${success ? '#A7F3D0' : '#FECACA'}`,
-                      }}>
-                        <i className={`ti ${success ? 'ti-circle-check' : 'ti-xbox-x'}`} style={{ fontSize: 12 }} />
-                        {success ? 'Success' : 'Failed'}
-                      </span>
-                    </td>
-
-                    {/* ACTIONS — ⋮ menu */}
-                    <td style={{ padding: '11px 16px', textAlign: 'right' }}>
-                      <RowMenu onView={() => setSelectedLog(log)} />
-                    </td>
+        {/* ── Table View ── */}
+        {filtered.length === 0 ? (
+          <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #E2E8F0', padding: '60px 24px', textAlign: 'center', color: '#94A3B8' }}>
+            <i className="ti ti-database-off" style={{ fontSize: 36, display: 'block', marginBottom: 10, color: '#CBD5E1' }} />
+            <div style={{ fontSize: 16, fontWeight: 700, color: '#0F172A', marginBottom: 4 }}>No audit events found</div>
+            <p style={{ margin: 0, fontSize: 13 }}>Try adjusting your filters, user, or date range.</p>
+          </div>
+        ) : (
+          <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #E2E8F0', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', minWidth: 860, borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.86rem' }}>
+                <thead>
+                  <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
+                    <th style={{ padding: '12px 18px', fontSize: '0.72rem', fontWeight: 800, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Timestamp</th>
+                    <th style={{ padding: '12px 18px', fontSize: '0.72rem', fontWeight: 800, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Result</th>
+                    <th style={{ padding: '12px 18px', fontSize: '0.72rem', fontWeight: 800, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Event / Action</th>
+                    <th style={{ padding: '12px 18px', fontSize: '0.72rem', fontWeight: 800, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Actor (User)</th>
+                    <th style={{ padding: '12px 18px', fontSize: '0.72rem', fontWeight: 800, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Module / Target</th>
+                    <th style={{ padding: '12px 18px', fontSize: '0.72rem', fontWeight: 800, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'right' }}>Actions</th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                </thead>
+                <tbody>
+                  {paged.map((log) => {
+                    const color = eventColor(log.action);
+                    const success = isSuccess(log.action);
+                    return (
+                      <tr
+                        key={log.id}
+                        style={{ borderBottom: '1px solid #F1F5F9', transition: 'background 0.15s' }}
+                        onMouseEnter={e => (e.currentTarget.style.background = '#F8FAFC')}
+                        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                      >
+                        <td style={{ padding: '14px 18px', whiteSpace: 'nowrap' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', color: '#475569', fontWeight: 600 }}>
+                            <i className="ti ti-clock" style={{ color: '#0D9488', fontSize: 13 }} />
+                            <span>{fmtDate(log.timestamp)}</span>
+                          </div>
+                        </td>
+                        <td style={{ padding: '14px 18px', whiteSpace: 'nowrap' }}>
+                          <span style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 5,
+                            padding: '3px 10px', borderRadius: 999, fontSize: '0.75rem', fontWeight: 700,
+                            background: success ? '#ECFDF5' : '#FEF2F2',
+                            color:      success ? '#059669' : '#DC2626',
+                            border: `1px solid ${success ? '#A7F3D0' : '#FECACA'}`,
+                          }}>
+                            <i className={`ti ${success ? 'ti-circle-check' : 'ti-xbox-x'}`} style={{ fontSize: 12 }} />
+                            {success ? 'Success' : 'Failed'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '14px 18px' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                            <span style={{
+                              fontSize: 10,
+                              fontWeight: 800,
+                              textTransform: 'uppercase',
+                              padding: '2px 7px',
+                              borderRadius: 5,
+                              background: `${color}15`,
+                              color: color,
+                              border: `1px solid ${color}30`,
+                              width: 'fit-content'
+                            }}>
+                              {log.action.replace(/_/g, ' ')}
+                            </span>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>
+                              {actionLabel(log.action)}
+                            </span>
+                          </div>
+                        </td>
+                        <td style={{ padding: '14px 18px' }}>
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 13, color: '#0F172A' }}>
+                              {log.userFullName}
+                            </div>
+                            <div style={{ fontSize: 11, color: '#64748B', fontWeight: 500 }}>
+                              {log.userRole || 'User'}
+                            </div>
+                          </div>
+                        </td>
+                        <td style={{ padding: '14px 18px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: '#334155' }}>
+                              {log.module}
+                            </span>
+                            {log.recordId && (
+                              <span style={{
+                                fontSize: 11,
+                                fontWeight: 700,
+                                color: '#475569',
+                                background: '#EEF2F6',
+                                padding: '2px 7px',
+                                borderRadius: 5,
+                                fontFamily: 'monospace'
+                              }}>
+                                {log.recordId}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td style={{ padding: '14px 18px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          <button
+                            onClick={() => setSelectedLog(log)}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              padding: '6px 14px',
+                              borderRadius: 8,
+                              border: '1px solid #E2E8F0',
+                              background: '#fff',
+                              color: '#0F172A',
+                              fontWeight: 600,
+                              fontSize: 12,
+                              cursor: 'pointer',
+                              transition: 'all 0.15s'
+                            }}
+                            onMouseEnter={e => {
+                              e.currentTarget.style.background = '#F0FDFA';
+                              e.currentTarget.style.borderColor = '#0D9488';
+                              e.currentTarget.style.color = '#0D9488';
+                            }}
+                            onMouseLeave={e => {
+                              e.currentTarget.style.background = '#fff';
+                              e.currentTarget.style.borderColor = '#E2E8F0';
+                              e.currentTarget.style.color = '#0F172A';
+                            }}
+                          >
+                            <i className="ti ti-eye" style={{ fontSize: 14 }} />
+                            View Details
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {/* Footer */}
         <div style={{

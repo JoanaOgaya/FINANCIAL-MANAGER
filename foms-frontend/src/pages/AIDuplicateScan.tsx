@@ -66,14 +66,17 @@ const CameraModal: React.FC<{
 
   const handleUsePhoto = () => {
     if (!captured) return;
-    // Convert data URL to File
-    fetch(captured)
-      .then(r => r.blob())
-      .then(blob => {
-        const file = new File([blob], `scan_${Date.now()}.png`, { type: 'image/png' });
-        onCapture(file);
-        onClose();
-      });
+    const arr = captured.split(',');
+    const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/png';
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    const file = new File([u8arr], `scan_${Date.now()}.png`, { type: mime });
+    onCapture(file);
+    onClose();
   };
 
   const flipCamera = () => {

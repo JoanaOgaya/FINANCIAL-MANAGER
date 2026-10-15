@@ -11,17 +11,24 @@ export { Role, ROLES } from './auth';
 
 export interface Client {
   id: string;
+  clientId?: string;
   name: string;
+  businessName?: string;
+  rateType?: string;
   contactPerson: string;
   email: string;
   phone: string;
   address: string;
+  creditLimit?: number;
+  tin?: string | null;
+  archived?: boolean;
   region: 'Luzon' | 'Visayas' | 'Mindanao' | 'Metro Manila';
   serviceArea?: string;
   billingSchedule: 'Monthly' | 'Semi-monthly' | 'Weekly';
   status: 'Active' | 'Inactive';
   vatStatus: 'VATable' | 'Non-VATable';
   vatRate: number | null;
+  clientCode?: string;
   createdAt: string;
 }
 
@@ -89,6 +96,8 @@ export interface Waybill {
   encodedBy: string;
   encodedAt: string;
   destinationArea?: string;
+  clientId?: string;
+  clientName?: string;
   
   // Verification features
   pod_image_url?: string;
@@ -117,6 +126,8 @@ export interface Waybill {
   specialInstructions?: string;
   declaredValue?: number;
   isODA?: boolean; // Outside Delivery Area
+  actualWeight?: number;
+  chargeableWeight?: number;
 }
 
 
@@ -360,6 +371,8 @@ export interface Liquidation {
   documents: { name: string; url: string; size: string }[];
   remarks?: string;
   expenses: LiquidationExpense[];
+  leftoverCash?: number;
+  reimbursementAmount?: number;
 }
 
 
@@ -372,6 +385,7 @@ export interface CashFlowRecord {
   sourceReference: string;
   date: string;
   recordedBy: string;
+  category?: string;
 }
 
 

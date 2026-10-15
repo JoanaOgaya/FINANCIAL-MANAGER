@@ -2,8 +2,6 @@ import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useFlaggedDuplicates } from '../hooks/useDuplicates';
 import { duplicatesService, type DuplicateFlagItem } from '../services/duplicates.service';
-import { DataTable, type Column } from '../components/shared/DataTable';
-import FilterBar from '../components/shared/FilterBar';
 import StatusBadge from '../components/shared/StatusBadge';
 import { PageHeader } from '../components/shared/PageHeader';
 import Button from '../components/Buttons';
@@ -75,13 +73,11 @@ export const FlaggedDuplicates: React.FC = () => {
   const handleActionSubmit = async () => {
     if (!activeItem || !modalAction) return;
 
-    // Both Level 1 decisions and Level 2 Return require remarks
     if ((modalAction === 'mark_duplicate' || modalAction === 'mark_not_duplicate' || modalAction === 'return') && !remarks.trim()) {
       setValidationError('Remarks and justification are required for this action.');
       return;
     }
 
-    // Separation of Duties check for Level 2 Approve
     if (modalAction === 'approve') {
       const sodCheck = canApproveOwnCheck(currentUserId, activeItem.decidedBy);
       if (!sodCheck.allowed) {
@@ -132,249 +128,395 @@ export const FlaggedDuplicates: React.FC = () => {
     }
   };
 
-  const columns: Column<DuplicateFlagItem>[] = [
-    {
-      key: 'flagId',
-      label: 'FLAG ID',
-      render: (row) => <span style={{ fontWeight: 700, color: '#0F172A' }}>{row.flagId}</span>,
-    },
-    {
-      key: 'type',
-      label: 'MATCH TYPE',
-      render: (row) => {
-        const sim = row.similarity ?? 0;
-        return (
-          <span
-            style={{
-              display: 'inline-block',
-              padding: '2px 8px',
-              borderRadius: '6px',
-              fontSize: '0.75rem',
-              fontWeight: 700,
-              background: sim >= 95 ? '#FEF2F2' : '#FFFBEB',
-              color: sim >= 95 ? '#EF4444' : '#D97706',
-            }}
-          >
-            {row.matchType || (sim >= 95 ? 'EXACT MATCH' : 'PARTIAL MATCH')}
-          </span>
-        );
-      },
-    },
-    {
-      key: 'uploadedNumber',
-      label: 'SOURCE DOC #',
-      render: (row) => <span>{row.uploadedNumber ?? 'N/A'}</span>,
-    },
-    {
-      key: 'existingRecord',
-      label: 'MATCHED RECORD',
-      render: (row) => <span style={{ color: '#4338CA', fontWeight: 600 }}>{row.existingRecord ?? 'N/A'}</span>,
-    },
-    {
-      key: 'clientName',
-      label: 'CLIENT NAME',
-      render: (row) => <span>{row.clientName ?? 'N/A'}</span>,
-    },
-    {
-      key: 'similarity',
-      label: 'SIMILARITY',
-      render: (row) => (
-        <span style={{ fontWeight: 700, color: (row.similarity ?? 0) >= 95 ? '#EF4444' : '#D97706' }}>
-          {row.similarity !== undefined ? `${row.similarity}%` : 'N/A'}
-        </span>
-      ),
-    },
-    {
-      key: 'status',
-      label: 'STATUS',
-      render: (row) => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <StatusBadge status={row.status} />
-          {row.decidedRemarks && (
-            <span
-              style={{
-                fontSize: '0.75rem',
-                color: '#64748B',
-                fontStyle: 'italic',
-                maxWidth: 180,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-              title={row.decidedRemarks}
-            >
-              "{row.decidedRemarks}"
-            </span>
-          )}
-        </div>
-      ),
-    },
-  ];
-
-  const filterFields = [
-    {
-      key: 'status',
-      label: 'STATUS',
-      type: 'select' as const,
-      options: [
-        { label: 'All Statuses', value: '' },
-        { label: 'Flagged (Unverified)', value: 'FLAGGED' },
-        { label: 'Pending Review (Level 2)', value: 'PENDING_REVIEW' },
-        { label: 'Returned for Re-decision', value: 'RETURNED' },
-        { label: 'Approved Duplicate', value: 'APPROVED_DUPLICATE' },
-        { label: 'Cleared (Not Duplicate)', value: 'CLEARED_NOT_DUPLICATE' },
-      ],
-    },
-    {
-      key: 'dateFrom',
-      label: 'FLAGGED DATE',
-      type: 'date' as const,
-    },
-  ];
-
-  const filterValues = {
-    status: statusFilter,
-    dateFrom,
-  };
-
-  const handleFieldChange = (key: string, value: string) => {
-    if (key === 'status') setStatusFilter(value);
-    if (key === 'dateFrom') setDateFrom(value);
-  };
+  const totalPages = Math.ceil(items.length / pageSize) || 1;
+  const paginatedItems = items.slice((page - 1) * pageSize, page * pageSize);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {!isFinancialManager && (
-        <PageHeader
-          title={isHeadAccountant ? 'Duplicate Review Queue' : 'Flagged Duplicates'}
-          subtitle={
-            isHeadAccountant
-              ? 'Level 2 Review Queue: Verify and approve or return duplicate decisions made by Accountants.'
-              : scope === 'liquidation'
-              ? 'Level 1: Decide on flagged duplicate liquidation expenses and vouchers.'
-              : scope === 'own'
-              ? 'Level 1: Review AI-flagged duplicate documents and mark as Duplicate or Not Duplicate.'
-              : 'Review, decide, and approve AI-flagged duplicate documents across accounts.'
-          }
-        />
-      )}
-
       {scope === 'liquidation' && (
-        <div
-          style={{
-            padding: '8px 14px',
-            background: '#F0F9FF',
-            border: '1px solid #BAE6FD',
-            borderRadius: '8px',
-            fontSize: '0.8rem',
-            color: '#0369A1',
-            fontWeight: 600,
-          }}
-        >
-          <i className="ti ti-filter" style={{ marginRight: 6 }} />
+        <div style={{ padding: '10px 16px', background: '#F0F9FF', border: '1px solid #BAE6FD', borderRadius: '10px', fontSize: '0.85rem', color: '#0369A1', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <i className="ti ti-filter" />
           Assistant FM Scope: Liquidation &amp; Expense Documents Only
         </div>
       )}
 
-      <FilterBar
-        searchValue={search}
-        onSearchChange={setSearch}
-        searchPlaceholder="Search flags, doc number, client…"
-        fields={filterFields}
-        values={filterValues}
-        onFieldChange={handleFieldChange}
-        onApply={applyFilters}
-        onReset={resetFilters}
-      />
+      {/* Filter and Search Bar */}
+      <div style={{
+        background: '#fff',
+        borderRadius: 12,
+        border: '1px solid #E2E8F0',
+        padding: '16px 20px',
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: 14,
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
+      }}>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', flex: 1 }}>
+          <div style={{ position: 'relative', minWidth: '260px', flex: 1 }}>
+            <i className="ti ti-search" style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: '#94A3B8', fontSize: 16 }} />
+            <input
+              type="text"
+              placeholder="Search flags, doc number, client..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '9px 14px 9px 38px',
+                borderRadius: 8,
+                border: '1px solid #E2E8F0',
+                fontSize: '13px',
+                outline: 'none',
+                background: '#F8FAFC',
+                color: '#1E293B',
+                boxSizing: 'border-box',
+                transition: 'border-color 0.2s, background 0.2s'
+              }}
+              onFocus={e => { e.currentTarget.style.borderColor = '#0D9488'; e.currentTarget.style.background = '#fff'; }}
+              onBlur={e => { e.currentTarget.style.borderColor = '#E2E8F0'; e.currentTarget.style.background = '#F8FAFC'; }}
+            />
+          </div>
 
-      <DataTable
-        rows={items}
-        columns={columns}
-        rowKey={(r) => r.id}
-        total={total}
-        page={page}
-        pageSize={pageSize}
-        onPageChange={setPage}
-        isLoading={isLoading}
-        error={error}
-        onRetry={refetch}
-        emptyMessage="No flagged duplicate documents found."
-        renderActions={(row) => {
-          const canDecide = canDecideDuplicate(user?.role, row.status, row.documentType);
-          const canReview = canReviewDuplicate(user?.role, row.status, row.documentType);
-          const sodCheck = canApproveOwnCheck(currentUserId, row.decidedBy);
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            style={{
+              padding: '9px 14px',
+              borderRadius: 8,
+              border: '1px solid #E2E8F0',
+              fontSize: '13px',
+              outline: 'none',
+              background: '#F8FAFC',
+              color: '#334155',
+              fontWeight: 500,
+              cursor: 'pointer'
+            }}
+          >
+            <option value="">All Statuses</option>
+            {Object.entries(DUPLICATE_STATUS_LABELS).map(([val, label]) => (
+              <option key={val} value={val}>{label}</option>
+            ))}
+          </select>
 
-          return (
-            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
-              <Button
-                title="Inspect"
-                variant="secondary"
-                size="sm"
-                onClick={() => setInspectDoc(row)}
-              />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#64748B' }}>Date:</span>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              style={{
+                padding: '8px 12px',
+                borderRadius: 8,
+                border: '1px solid #E2E8F0',
+                fontSize: '13px',
+                outline: 'none',
+                background: '#F8FAFC',
+                color: '#334155'
+              }}
+            />
+          </div>
+        </div>
 
-              {/* Level 1: Accountant / Asst FM Decision Actions */}
-              {canDecide && (
-                <>
-                  <Button
-                    title="Mark Real Duplicate"
-                    variant="danger"
-                    size="sm"
-                    onClick={() => handleOpenAction(row, 'mark_duplicate')}
-                  />
-                  <Button
-                    title="Mark False Positive"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => handleOpenAction(row, 'mark_not_duplicate')}
-                  />
-                </>
-              )}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            onClick={() => { applyFilters(); }}
+            style={{
+              padding: '8px 16px',
+              borderRadius: 8,
+              border: 'none',
+              background: '#0D9488',
+              color: '#fff',
+              fontSize: '13px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6
+            }}
+          >
+            <i className="ti ti-check" />
+            Apply
+          </button>
+          <button
+            onClick={() => { resetFilters(); }}
+            style={{
+              padding: '8px 14px',
+              borderRadius: 8,
+              border: '1px solid #E2E8F0',
+              background: '#fff',
+              color: '#64748B',
+              fontSize: '13px',
+              fontWeight: 600,
+              cursor: 'pointer'
+            }}
+          >
+            Reset
+          </button>
+        </div>
+      </div>
 
-              {/* Level 2: Head Accountant / FM Review Actions */}
-              {canReview && (
-                <>
-                  <Button
-                    title="Review"
-                    variant="primary"
-                    size="sm"
-                    onClick={() => setReviewPanelDoc(row)}
-                  />
-                  {sodCheck.allowed ? (
-                    <Button
-                      title="Approve"
-                      variant="success"
-                      size="sm"
-                      onClick={() => handleOpenAction(row, 'approve')}
-                    />
-                  ) : (
-                    <span
-                      style={{
-                        fontSize: '0.75rem',
-                        color: '#EF4444',
-                        fontWeight: 600,
-                        padding: '4px 8px',
-                        background: '#FEF2F2',
-                        borderRadius: 4,
-                        border: '1px solid #FECACA',
-                      }}
-                      title="You cannot approve your own decision"
-                    >
-                      Cannot Self-Approve
+      {/* Error state */}
+      {error && (
+        <div style={{ padding: '16px 20px', background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 12, color: '#991B1B', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <strong>Error loading flagged duplicates:</strong> {error.message || 'Unknown error'}
+          </div>
+          <button onClick={() => refetch()} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#EF4444', color: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}>
+            Retry
+          </button>
+        </div>
+      )}
+
+      {/* Loading state */}
+      {isLoading && (
+        <div style={{ textAlign: 'center', padding: '60px 20px', color: '#64748B' }}>
+          <i className="ti ti-loader-2 ti-spin" style={{ fontSize: 32, color: '#0D9488', marginBottom: 12 }} />
+          <div style={{ fontWeight: 600 }}>Loading flagged duplicates...</div>
+        </div>
+      )}
+
+      {/* Empty State */}
+      {!isLoading && !error && items.length === 0 && (
+        <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #E2E8F0', padding: '60px 20px', textAlign: 'center' }}>
+          <div style={{ width: 56, height: 56, borderRadius: '50%', background: '#F1F5F9', color: '#94A3B8', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', fontSize: 28 }}>
+            <i className="ti ti-copy-check" />
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: '#0F172A', marginBottom: 6 }}>No flagged duplicate documents found</div>
+          <p style={{ margin: 0, fontSize: 13, color: '#64748B' }}>
+            There are currently no AI-detected duplicate documents requiring attention.
+          </p>
+        </div>
+      )}
+
+      {/* Cards Grid */}
+      {!isLoading && !error && items.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 20 }}>
+          {paginatedItems.map((row) => {
+            const sim = row.similarity ?? 0;
+            const isExact = sim >= 95 || (row.matchType && row.matchType.toUpperCase().includes('EXACT'));
+            const canDecide = canDecideDuplicate(user?.role, row.status, row.documentType);
+            const canReview = canReviewDuplicate(user?.role, row.status, row.documentType);
+            const sodCheck = canApproveOwnCheck(currentUserId, row.decidedBy);
+
+            return (
+              <div
+                key={row.id}
+                style={{
+                  background: '#fff',
+                  border: '1px solid #E2E8F0',
+                  borderRadius: 14,
+                  padding: 22,
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 14,
+                  transition: 'transform 0.2s, box-shadow 0.2s',
+                  position: 'relative'
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.transform = 'translateY(-2px)';
+                  e.currentTarget.style.boxShadow = '0 8px 16px -4px rgba(0,0,0,0.08)';
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.04)';
+                }}
+              >
+                {/* Top Row: Flag ID + Match Type Pill + Similarity */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 12, fontWeight: 800, color: '#0F172A' }}>
+                      FLAG # <span>{row.flagId}</span>
                     </span>
+                    <span style={{
+                      padding: '3px 9px',
+                      borderRadius: '6px',
+                      fontSize: '11px',
+                      fontWeight: 800,
+                      background: isExact ? '#FEF2F2' : '#FFFBEB',
+                      color: isExact ? '#EF4444' : '#D97706',
+                    }}>
+                      {row.matchType || (isExact ? 'EXACT MATCH' : 'PARTIAL MATCH')}
+                    </span>
+                  </div>
+
+                  <span style={{
+                    fontSize: 12,
+                    fontWeight: 800,
+                    color: isExact ? '#DC2626' : '#D97706',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4
+                  }}>
+                    <i className="ti ti-flame" />
+                    {sim}% Match
+                  </span>
+                </div>
+
+                {/* Source Document Number & Client */}
+                <div>
+                  <div style={{ fontSize: 17, fontWeight: 800, color: '#0F172A', letterSpacing: '-0.01em', lineHeight: 1.3 }}>
+                    {row.uploadedNumber || '—'}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                    <span style={{ fontSize: 13, color: '#475569', fontWeight: 600 }}>
+                      {row.clientName || 'General Client'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Matched Record Box */}
+                <div style={{
+                  padding: '12px 14px',
+                  borderRadius: 10,
+                  background: '#F8FAFC',
+                  border: '1px solid #E2E8F0',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 4
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: '#64748B' }}>Matched Record</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: row.existingRecord && row.existingRecord !== 'N/A' ? '#4338CA' : '#94A3B8' }}>
+                      {row.existingRecord || 'N/A'}
+                    </span>
+                  </div>
+                  {row.duplicateReason && (
+                    <div style={{ fontSize: 11, color: '#64748B', fontStyle: 'italic', marginTop: 2 }}>
+                      {row.duplicateReason.replace(/â,±/g, '₱')}
+                    </div>
                   )}
+                </div>
+
+                {/* Workflow Status */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 11, color: '#94A3B8', fontWeight: 500 }}>
+                    Flagged: {row.flaggedDate || 'Recent'}
+                  </span>
+                  <StatusBadge status={row.status} />
+                </div>
+
+                {/* Actions Footer */}
+                <div style={{ borderTop: '1px solid #F1F5F9', paddingTop: 14, display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center' }}>
                   <Button
-                    title="Return"
+                    title="Inspect"
                     variant="secondary"
                     size="sm"
-                    onClick={() => handleOpenAction(row, 'return')}
+                    icon="ti-eye"
+                    onClick={() => setInspectDoc(row)}
                   />
-                </>
-              )}
-            </div>
-          );
-        }}
-      />
+
+                  {/* Level 1: Accountant / Asst FM Decision Actions */}
+                  {canDecide && (
+                    <>
+                      <Button
+                        title="Mark Real Duplicate"
+                        variant="danger"
+                        size="sm"
+                        onClick={() => handleOpenAction(row, 'mark_duplicate')}
+                      />
+                      <Button
+                        title="Mark False Positive"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => handleOpenAction(row, 'mark_not_duplicate')}
+                      />
+                    </>
+                  )}
+
+                  {/* Level 2: Head Accountant / FM Review Actions */}
+                  {canReview && (
+                    <>
+                      <Button
+                        title="Review"
+                        variant="primary"
+                        size="sm"
+                        onClick={() => setReviewPanelDoc(row)}
+                      />
+                      {sodCheck.allowed ? (
+                        <Button
+                          title="Approve"
+                          variant="success"
+                          size="sm"
+                          onClick={() => handleOpenAction(row, 'approve')}
+                        />
+                      ) : (
+                        <span
+                          style={{
+                            fontSize: '0.72rem',
+                            color: '#EF4444',
+                            fontWeight: 600,
+                            padding: '4px 8px',
+                            background: '#FEF2F2',
+                            borderRadius: 4,
+                            border: '1px solid #FECACA',
+                          }}
+                          title="You cannot approve your own decision"
+                        >
+                          Cannot Self-Approve
+                        </span>
+                      )}
+                      <Button
+                        title="Return"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => handleOpenAction(row, 'return')}
+                      />
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Pagination */}
+      {!isLoading && !error && items.length > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 4px', fontSize: 13, color: '#64748B' }}>
+          <div>
+            Showing {(page - 1) * pageSize + 1} - {Math.min(page * pageSize, items.length)} of {items.length} records
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={() => setPage(page - 1)}
+              disabled={page <= 1}
+              style={{
+                padding: '6px 14px',
+                borderRadius: 8,
+                border: '1px solid #E2E8F0',
+                background: page <= 1 ? '#F8FAFC' : '#fff',
+                color: page <= 1 ? '#CBD5E1' : '#334155',
+                cursor: page <= 1 ? 'not-allowed' : 'pointer',
+                fontWeight: 600,
+                fontSize: 12
+              }}
+            >
+              Previous
+            </button>
+            <span style={{ display: 'flex', alignItems: 'center', padding: '0 8px', fontWeight: 700, color: '#0F172A' }}>
+              {page} / {totalPages}
+            </span>
+            <button
+              onClick={() => setPage(page + 1)}
+              disabled={page >= totalPages}
+              style={{
+                padding: '6px 14px',
+                borderRadius: 8,
+                border: '1px solid #E2E8F0',
+                background: page >= totalPages ? '#F8FAFC' : '#fff',
+                color: page >= totalPages ? '#CBD5E1' : '#334155',
+                cursor: page >= totalPages ? 'not-allowed' : 'pointer',
+                fontWeight: 600,
+                fontSize: 12
+              }}
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Level 1 & Level 2 Action Modal */}
       {modalAction && activeItem && (
@@ -497,82 +639,101 @@ export const FlaggedDuplicates: React.FC = () => {
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'rgba(0,0,0,0.5)',
+            background: 'rgba(15, 23, 42, 0.5)',
             zIndex: 9999,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
+            backdropFilter: 'blur(3px)'
           }}
           onClick={() => setInspectDoc(null)}
         >
           <div
             style={{
               background: '#fff',
-              borderRadius: 12,
-              padding: 24,
+              borderRadius: 16,
+              padding: 26,
               maxWidth: 520,
-              width: '90%',
-              boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)',
+              width: '92%',
+              boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
+              border: '1px solid #E2E8F0'
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: '#0F172A' }}>
-                Flag Inspection — {inspectDoc.flagId}
-              </h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 800, color: '#0F172A' }}>
+                  Flag Inspection
+                </h3>
+                <div style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>
+                  Flag ID #{inspectDoc.flagId}
+                </div>
+              </div>
               <button
                 type="button"
                 onClick={() => setInspectDoc(null)}
-                style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#64748B' }}
+                style={{
+                  background: '#F1F5F9',
+                  border: 'none',
+                  width: 32,
+                  height: 32,
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  fontSize: 18,
+                  color: '#64748B'
+                }}
               >
                 &times;
               </button>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: '0.85rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#64748B' }}>Source Document:</span>
-                <strong>{inspectDoc.uploadedNumber}</strong>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: '0.875rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #F1F5F9', paddingBottom: 8 }}>
+                <span style={{ color: '#64748B' }}>Source Document</span>
+                <strong style={{ color: '#0F172A' }}>{inspectDoc.uploadedNumber}</strong>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#64748B' }}>Matched Record:</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #F1F5F9', paddingBottom: 8 }}>
+                <span style={{ color: '#64748B' }}>Matched Record</span>
                 <strong style={{ color: '#4338CA' }}>{inspectDoc.existingRecord}</strong>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#64748B' }}>Client Name:</span>
-                <span>{inspectDoc.clientName}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #F1F5F9', paddingBottom: 8 }}>
+                <span style={{ color: '#64748B' }}>Client Name</span>
+                <span style={{ fontWeight: 600 }}>{inspectDoc.clientName}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#64748B' }}>AI Similarity:</span>
-                <strong style={{ color: (inspectDoc.similarity ?? 0) >= 95 ? '#EF4444' : '#D97706' }}>
-                  {inspectDoc.similarity !== undefined ? `${inspectDoc.similarity}%` : 'N/A'}
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #F1F5F9', paddingBottom: 8 }}>
+                <span style={{ color: '#64748B' }}>AI Similarity</span>
+                <strong style={{ color: (inspectDoc.similarity ?? 0) >= 95 ? '#EF4444' : '#D97706', fontWeight: 800 }}>
+                  {inspectDoc.similarity !== undefined ? `${inspectDoc.similarity}% Match` : 'N/A'}
                 </strong>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#64748B' }}>Match Reason:</span>
-                <span>{inspectDoc.duplicateReason}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #F1F5F9', paddingBottom: 8 }}>
+                <span style={{ color: '#64748B' }}>Match Reason</span>
+                <span style={{ fontStyle: 'italic' }}>{inspectDoc.duplicateReason}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#64748B' }}>Workflow Status:</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #F1F5F9', paddingBottom: 8 }}>
+                <span style={{ color: '#64748B' }}>Workflow Status</span>
                 <StatusBadge status={inspectDoc.status} />
               </div>
               {inspectDoc.decision && (
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#64748B' }}>Level 1 Decision:</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #F1F5F9', paddingBottom: 8 }}>
+                  <span style={{ color: '#64748B' }}>Level 1 Decision</span>
                   <strong>{inspectDoc.decision}</strong>
                 </div>
               )}
               {inspectDoc.decidedRemarks && (
-                <div style={{ background: '#F8FAFC', padding: '8px 12px', borderRadius: 6, marginTop: 4 }}>
-                  <span style={{ color: '#64748B', display: 'block', fontSize: '0.75rem', fontWeight: 600 }}>
+                <div style={{ background: '#F8FAFC', padding: '10px 14px', borderRadius: 8, marginTop: 4 }}>
+                  <span style={{ color: '#64748B', display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: 2 }}>
                     Accountant Remarks:
                   </span>
-                  <span>{inspectDoc.decidedRemarks}</span>
+                  <span style={{ color: '#334155' }}>{inspectDoc.decidedRemarks}</span>
                 </div>
               )}
             </div>
 
-            <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end' }}>
+            <div style={{ marginTop: 22, display: 'flex', justifyContent: 'flex-end' }}>
               <Button title="Close" variant="secondary" size="sm" onClick={() => setInspectDoc(null)} />
             </div>
           </div>

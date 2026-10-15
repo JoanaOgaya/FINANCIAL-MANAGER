@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Card } from '../components/Card';
 import { Button } from '../components/Buttons';
@@ -10,6 +10,7 @@ import { createPortal } from 'react-dom';
 import { settlementsService } from '../services/settlementsService';
 import { cashFlowService } from '../services/cashFlowService';
 import { useQuery } from '../hooks/useQuery';
+import { invalidateForMutation } from '../services/invalidation';
 import { Settlement } from '../types/entities';
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import { formatCurrency } from '../utils/format';
@@ -27,8 +28,7 @@ const Settlements: React.FC = () => {
     return res.items || [];
   });
 
-  const [localSettlements, setLocalSettlements] = useState<Settlement[] | null>(null);
-  const settlements = localSettlements ?? fetchedSettlements ?? [];
+  const settlements = fetchedSettlements ?? [];
 
   const [filterTab, setFilterTab] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -37,20 +37,12 @@ const Settlements: React.FC = () => {
   const [typeFilter, setTypeFilter] = useState('');
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
-
-  useEffect(() => {
-    const saved = localStorage.getItem('settlements_recentSearches');
-    if (saved) {
-      try { setRecentSearches(JSON.parse(saved)); } catch (e) {}
-    }
-  }, []);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const saveRecentSearch = (term: string) => {
     if (!term.trim()) return;
     setRecentSearches(prev => {
-      const updated = [term.trim(), ...prev.filter(t => t.toLowerCase() !== term.trim().toLowerCase())].slice(0, 5);
-      localStorage.setItem('settlements_recentSearches', JSON.stringify(updated));
-      return updated;
+      return [term.trim(), ...prev.filter(t => t.toLowerCase() !== term.trim().toLowerCase())].slice(0, 5);
     });
   };
 
@@ -124,15 +116,16 @@ const Settlements: React.FC = () => {
   };
 
   const handleConfirmDecision = async () => {
-    if (!decision || !selectedRecord) {
-      toast.error('Please select a decision first.');
+    if (!decision || !selectedRecord || isSubmitting) {
+      if (!decision) toast.error('Please select a decision first.');
       return;
     }
-    
+
+    setIsSubmitting(true);
     try {
       const newStatus = decision === 'approve' ? 'Validated' : 'Rejected';
       await settlementsService.update(selectedRecord.id, { status: newStatus as any });
-      
+
       // Add to cash flow if validated
       if (decision === 'approve') {
         const isLeftover = selectedRecord.type === 'Leftover return';
@@ -145,11 +138,13 @@ const Settlements: React.FC = () => {
         });
       }
 
-      setLocalSettlements(settlements.map((s: Settlement) => s.id === selectedRecord.id ? { ...s, status: newStatus as any } : s));
+      invalidateForMutation(decision === 'approve' ? 'approveSettlement' : 'rejectSettlement');
       toast.success(`Settlement ${selectedRecord.id} has been ${newStatus.toLowerCase()}.`);
       setSelectedRecord(null);
     } catch (err: any) {
       toast.error(err.message || 'Failed to update settlement');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -160,7 +155,7 @@ const Settlements: React.FC = () => {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       {/* Stats Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px' }}>
+      <div className="kpi-grid">
         <KpiCard 
           label="Pending Validation" 
           value={pendingCount} 
@@ -276,92 +271,195 @@ const Settlements: React.FC = () => {
           </div>
         </div>
 
-        {/* Custom Table to exactly match the requested design */}
-        <div style={{ border: '1px solid #E2E8F0', borderRadius: '8px', overflow: 'visible' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-            <thead>
-              <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
-                <th style={thStyle}>RECORD ID</th>
-                <th style={thStyle}>TYPE</th>
-                <th style={thStyle}>COURIER / TRIP</th>
-                <th style={thStyle}>SUBMITTED</th>
-                <th style={thStyle}>AMOUNT</th>
-                <th style={thStyle}>STATUS</th>
-                <th style={thStyle}>ACTION</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredData.length === 0 ? (
-                <tr>
-                  <td colSpan={7} style={{ padding: '24px', textAlign: 'center', color: '#64748B', fontSize: '14px' }}>
-                    No settlements found.
-                  </td>
-                </tr>
-              ) : filteredData.map((row: Settlement) => (
-                <tr key={row.id} style={{ borderBottom: '1px solid #E2E8F0' }}>
-                  <td style={{ ...tdStyle, fontWeight: 700 }}>{row.id}</td>
-                  <td style={tdStyle}>
-                    <span style={{ 
-                      padding: '4px 10px', 
-                      borderRadius: '20px', 
-                      fontSize: '11px', 
+        {/* Settlements Cards Grid */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '8px 0 16px' }}>
+          <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#64748B' }}>
+            Showing <strong style={{ color: '#0F172A' }}>{filteredData.length}</strong> settlement record{filteredData.length === 1 ? '' : 's'}
+          </div>
+        </div>
+
+        {filteredData.length === 0 ? (
+          <div style={{
+            background: '#F8FAFC',
+            borderRadius: 12,
+            border: '1px solid #E2E8F0',
+            padding: '48px 20px',
+            textAlign: 'center',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8
+          }}>
+            <div style={{ width: 48, height: 48, borderRadius: '50%', background: '#F1F5F9', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94A3B8', fontSize: 24 }}>
+              <i className="ti ti-receipt-off" />
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#0F172A' }}>No settlements found</div>
+            <p style={{ margin: 0, fontSize: 13, color: '#64748B' }}>
+              No settlement records match the current filter or search criteria.
+            </p>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 20 }}>
+            {filteredData.map((row: Settlement) => {
+              const isLeftover = row.type === 'Leftover return';
+              const isPending = row.status === 'For validation';
+              return (
+                <div
+                  key={row.id}
+                  style={{
+                    background: '#fff',
+                    border: '1px solid #E2E8F0',
+                    borderRadius: 14,
+                    padding: 22,
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 14,
+                    transition: 'all 0.2s ease',
+                  }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                    e.currentTarget.style.boxShadow = '0 8px 16px -4px rgba(0,0,0,0.08)';
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.04)';
+                  }}
+                >
+                  {/* Top Row: Type Badge + Status */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{
+                      padding: '4px 10px',
+                      borderRadius: '20px',
+                      fontSize: '11px',
                       fontWeight: 700,
-                      background: row.type === 'Leftover return' ? '#ECFDF5' : '#FFFBEB',
-                      color: row.type === 'Leftover return' ? '#065F46' : '#92400E'
+                      background: isLeftover ? '#ECFDF5' : '#FFFBEB',
+                      color: isLeftover ? '#065F46' : '#92400E',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4
                     }}>
+                      <i className={`ti ${isLeftover ? 'ti-cash-banknote' : 'ti-receipt-2'}`} />
                       {row.type}
                     </span>
-                  </td>
-                  <td style={tdStyle}>
-                    <div style={{ fontWeight: 600, color: '#1E293B', marginBottom: '2px' }}>{row.courierName}</div>
-                    <div style={{ fontSize: '12px', color: '#64748B' }}>{row.tripRef}</div>
-                  </td>
-                  <td style={tdStyle}>
-                    <div style={{ fontWeight: 600, color: '#1E293B', marginBottom: '2px' }}>
-                      {new Date(row.submittedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                      , {new Date(row.submittedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-                    </div>
-                  </td>
-                  <td style={tdStyle}>
-                    <div style={{ fontWeight: 800, color: row.type === 'Leftover return' ? '#10B981' : '#3B82F6' }}>
-                      {formatCurrency(row.amount)}
-                    </div>
-                    {Boolean(row.discrepancy && row.discrepancy !== 0) && (
-                      <div style={{ fontSize: '11px', color: '#EA580C', fontWeight: 600, marginTop: '2px' }}>
-                        Discrepancy {formatCurrency(row.discrepancy)}
-                      </div>
-                    )}
-                  </td>
-                  <td style={tdStyle}>
-                    <span style={{ 
-                      padding: '4px 10px', 
-                      borderRadius: '20px', 
-                      fontSize: '11px', 
+                    <span style={{
+                      padding: '4px 10px',
+                      borderRadius: '20px',
+                      fontSize: '11px',
                       fontWeight: 700,
-                      background: row.status === 'For validation' ? '#FFFBEB' : row.status === 'Validated' ? '#ECFDF5' : '#FEF2F2',
-                      color: row.status === 'For validation' ? '#B45309' : row.status === 'Validated' ? '#047857' : '#991B1B'
+                      background: isPending ? '#FFFBEB' : row.status === 'Validated' ? '#ECFDF5' : '#FEF2F2',
+                      color: isPending ? '#B45309' : row.status === 'Validated' ? '#047857' : '#991B1B'
                     }}>
                       {row.status}
                     </span>
-                  </td>
-                  <td style={tdStyle}>
-                    <Dropdown
-                      align="right"
-                      items={[
-                        {
-                          key: 'review',
-                          label: row.status === 'For validation' ? 'Review Details' : 'View Details',
-                          icon: row.status === 'For validation' ? 'ti-file-search' : 'ti-eye',
-                          onClick: () => handleReviewClick(row)
-                        }
-                      ]}
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                  </div>
+
+                  {/* Courier Name & Trip Ref */}
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: 17, color: '#0F172A', lineHeight: 1.3 }}>
+                      {row.courierName}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                      <span style={{ fontFamily: 'monospace', fontSize: 12, fontWeight: 700, color: '#475569', background: '#F1F5F9', padding: '2px 8px', borderRadius: 4 }}>
+                        {row.tripRef}
+                      </span>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: '#94A3B8' }}>
+                        ID: #{row.id}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Amount Highlight Box */}
+                  <div style={{
+                    padding: '12px 16px',
+                    borderRadius: 10,
+                    background: isLeftover ? '#F0FDF4' : '#EFF6FF',
+                    border: `1px solid ${isLeftover ? '#BBF7D0' : '#BFDBFE'}`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between'
+                  }}>
+                    <div>
+                      <div style={{ fontSize: 10, fontWeight: 800, color: isLeftover ? '#166534' : '#1E40AF', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                        {isLeftover ? 'LEFTOVER AMOUNT' : 'REIMBURSEMENT AMOUNT'}
+                      </div>
+                      <div style={{ fontSize: 22, fontWeight: 800, color: isLeftover ? '#15803D' : '#2563EB', marginTop: 2 }}>
+                        {formatCurrency(row.amount)}
+                      </div>
+                    </div>
+                    {Boolean(row.discrepancy && row.discrepancy !== 0) && (
+                      <div style={{ textAlign: 'right' }}>
+                        <span style={{
+                          padding: '3px 8px',
+                          borderRadius: 6,
+                          background: '#FEF2F2',
+                          color: '#DC2626',
+                          border: '1px solid #FECACA',
+                          fontSize: 10.5,
+                          fontWeight: 700
+                        }}>
+                          Discrepancy: {formatCurrency(row.discrepancy)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Details Grid */}
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(2, 1fr)',
+                    gap: 10,
+                    padding: '10px 14px',
+                    background: '#F8FAFC',
+                    borderRadius: 8,
+                    border: '1px solid #F1F5F9'
+                  }}>
+                    <div>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: '#64748B', letterSpacing: '0.04em' }}>CASH ADVANCE</div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: '#0F172A', marginTop: 2 }}>
+                        {formatCurrency(row.cashAdvance)}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: '#64748B', letterSpacing: '0.04em' }}>SUBMITTED AT</div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: '#0F172A', marginTop: 2 }}>
+                        {new Date(row.submittedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, {new Date(row.submittedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions Footer */}
+                  <div style={{ marginTop: 'auto', paddingTop: 6 }}>
+                    <button
+                      type="button"
+                      onClick={() => handleReviewClick(row)}
+                      style={{
+                        width: '100%',
+                        padding: '10px 14px',
+                        background: isPending ? '#0D9488' : '#0F172A',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 8,
+                        fontWeight: 700,
+                        fontSize: 13,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 6,
+                        boxShadow: isPending ? '0 2px 4px rgba(13,148,136,0.25)' : 'none'
+                      }}
+                    >
+                      <i className={isPending ? "ti ti-file-search" : "ti ti-eye"} />
+                      {isPending ? 'Review Settlement' : 'View Details'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </Card>
 
       {/* Review Modal */}
@@ -522,9 +620,9 @@ const Settlements: React.FC = () => {
                       color: 'white',
                       opacity: decision ? 1 : 0.5
                     }}
-                    disabled={!decision}
+                    disabled={!decision || isSubmitting}
                   >
-                    {decision === 'reject' ? 'Confirm reject' : decision === 'approve' ? 'Confirm validate' : 'Confirm'}
+                    {isSubmitting ? 'Processing...' : decision === 'reject' ? 'Confirm reject' : decision === 'approve' ? 'Confirm validate' : 'Confirm'}
                   </button>
                 )}
               </div>

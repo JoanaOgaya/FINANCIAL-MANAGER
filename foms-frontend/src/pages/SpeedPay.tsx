@@ -7,6 +7,7 @@ import { User, Lock, AlertCircle, Eye, EyeOff, Calendar } from 'lucide-react';
 import { invoicesService } from '../services/invoicesService';
 import { clientsService } from '../services/clientsService';
 import { speedpayService } from '../services/speedpayService';
+import { createPayMongoLink } from '../services/paymongoService';
 import { paymentsService } from '../services/paymentsService';
 import { useQuery } from '../hooks/useQuery';
 import { Invoice, Client, SpeedPaySubmission } from '../types/entities';
@@ -307,36 +308,13 @@ export const SpeedPay: React.FC = () => {
       const amountInCents = Math.round(foundInvoice.totalAmount * 100);
       if (amountInCents < 10000) throw new Error(`Minimum amount is ₱100. Invoice total is ${formatCurrency(foundInvoice.totalAmount)}.`);
 
-      const response = await fetch('https://api.paymongo.com/v1/links', {
-        method: 'POST',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'Authorization': `Basic ${btoa(secretKey + ':')}`
-        },
-        body: JSON.stringify({
-          data: {
-            attributes: {
-              amount: amountInCents,
-              currency: 'PHP',
-              description: `Payment for ${foundInvoice.invoiceNumber}`,
-              remarks: `Client: ${loggedInClient?.name}`,
-            },
-          },
-        }),
-      });
-
-      const rawText = await response.text();
-      let data: any;
-      try { data = JSON.parse(rawText); } catch { throw new Error(`Server returned unexpected response.`); }
-
-      if (!response.ok || data.errors || data.error) {
-        throw new Error(data.errors?.[0]?.detail ?? data.error ?? `PayMongo error (HTTP ${response.status})`);
-      }
-
-      const checkoutUrl: string = data.data.attributes.checkout_url;
-      const refNum: string = data.data.attributes.reference_number;
-      setReferenceNumber(refNum);
+      const { checkoutUrl, referenceNumber } = await createPayMongoLink(
+        secretKey,
+        amountInCents,
+        `Payment for ${foundInvoice.invoiceNumber}`,
+        `Client: ${loggedInClient?.name ?? ''}`,
+      );
+      setReferenceNumber(referenceNumber);
       window.open(checkoutUrl, '_blank');
       setIsProcessing(false);
       setStep('upload');

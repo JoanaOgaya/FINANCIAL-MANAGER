@@ -20,8 +20,8 @@ import type { DashboardAiAlert } from '../types/ai';
 function mockAuthUser(user: Partial<User> | null) {
   vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({
     user: user ? ({
-      id: user.id || 'EMP-001',
-      employeeId: user.employeeId || user.id || 'EMP-001',
+      id: user.id || 'STAFF-001',
+      employeeId: user.employeeId || user.id || 'STAFF-001',
       fullName: user.fullName || 'Test User',
       email: user.email || 'test@speedex.com',
       role: user.role || ROLES.ACCOUNTANT,
@@ -371,9 +371,9 @@ describe('Job B & Job A: Sidebar and Dashboard Verification Suite', () => {
   describe('Sidebar Badge Removal: All 4 Roles render 0 badges and all menu items intact', () => {
     const rolesToTest = [
       { role: ROLES.ACCOUNTANT, name: 'Accountant', expectedItemCount: 18 },
-      { role: ROLES.HEAD_ACCOUNTANT, name: 'Head Accountant', expectedItemCount: 16 },
+      { role: ROLES.HEAD_ACCOUNTANT, name: 'Head Accountant', expectedItemCount: 15 },
       { role: ROLES.ASSISTANT_FM, name: 'Assistant FM', expectedItemCount: 9 },
-      { role: ROLES.FINANCIAL_MANAGER, name: 'Financial Manager', expectedItemCount: 20 },
+      { role: ROLES.FINANCIAL_MANAGER, name: 'Financial Manager', expectedItemCount: 19 },
     ];
 
     rolesToTest.forEach(({ role, name, expectedItemCount }) => {

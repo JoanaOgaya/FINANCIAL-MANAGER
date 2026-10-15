@@ -151,7 +151,7 @@ export const HeadAccountantDashboard: React.FC = () => {
         secondaryCta={{ label: 'Audit Logs', onClick: () => navigate('/audit-logs') }}
       />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
+      <div className="kpi-grid">
         <KpiCard label="Invoices for Approval" value={pendingInvoices.length} icon="ti-file-check" variant="warning"
           trend={{ type: 'neutral', value: peso(valueAwaiting) }} periodText="awaiting decision" onClick={() => navigate('/invoice-review')} />
         <KpiCard label="Payments to Validate" value={pendingPayments.length + pendingSpeedPay.length} icon="ti-cash" variant="info"
